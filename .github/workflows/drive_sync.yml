@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: Run Drive sync script
+      - name: Run Drive flatten script
         env:
           GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
-        run: python pipeline/drive_script.py
+        run: python pipeline/drive_script.py --file-id 1i7L4oGAUodH1nVmLyyLtckiuZXcGA0N5
