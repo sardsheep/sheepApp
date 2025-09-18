@@ -48,22 +48,36 @@ def find_col(df, target, fallbacks):
     raise ValueError(f"Required column '{target}' not found. Available: {list(df.columns)}")
 
 def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, window: int = 30):
+    print(f"📂 Flattening {input_path} → {output_path} (chunk={chunk_size}, window={window})")
+
     if chunk_size % window != 0:
         raise ValueError(f"chunk_size ({chunk_size}) must be a multiple of window ({window}).")
 
     flattened_rows = []
 
-    for chunk in pd.read_csv(input_path, chunksize=chunk_size):
-        x_col = find_col(chunk, "X", ["x", "acc_x"])
-        y_col = find_col(chunk, "Y", ["y", "acc_y"])
-        z_col = find_col(chunk, "Z", ["z", "acc_z"])
-        t_col = find_col(chunk, "time", ["Time", "timestamp", "datetime"])
+    # Process file in chunks to keep memory low
+    for chunk_index, chunk in enumerate(pd.read_csv(input_path, chunksize=chunk_size)):
+        print(f"🔹 Processing chunk {chunk_index+1} with {len(chunk)} rows, columns={list(chunk.columns)}")
 
-        chunk = chunk[[x_col, y_col, z_col, t_col]].dropna()
-        n = len(chunk)
-        if n < window:
+        try:
+            x_col = find_col(chunk, "X", ["x", "acc_x", "accel_x"])
+            y_col = find_col(chunk, "Y", ["y", "acc_y", "accel_y"])
+            z_col = find_col(chunk, "Z", ["z", "acc_z", "accel_z"])
+            t_col = find_col(chunk, "time", ["Time", "timestamp", "datetime"])
+        except ValueError as e:
+            print(f"⚠️ Skipping chunk: {e}")
             continue
 
+        # Keep only needed columns
+        chunk = chunk[[x_col, y_col, z_col, t_col]].dropna()
+        n = len(chunk)
+        print(f"   After filtering, {n} rows remain")
+
+        if n < window:
+            print(f"   ⚠️ Not enough rows for one full window (need {window}, got {n})")
+            continue
+
+        # Convert to numpy for speed
         x = chunk[x_col].to_numpy()
         y = chunk[y_col].to_numpy()
         z = chunk[z_col].to_numpy()
@@ -72,21 +86,27 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
         usable = (n // window) * window
         x = x[:usable]; y = y[:usable]; z = z[:usable]; t = t[:usable]
 
+        # Reshape into (num_windows, window)
         xw = x.reshape(-1, window)
         yw = y.reshape(-1, window)
         zw = z.reshape(-1, window)
         tw = t.reshape(-1, window)
 
+        print(f"   ✅ Creating {xw.shape[0]} flattened rows")
+
+        # Build flattened rows
         for i in range(xw.shape[0]):
             row = {}
             for j in range(window):
                 row[f"x_{j+1}"] = xw[i, j]
                 row[f"y_{j+1}"] = yw[i, j]
                 row[f"z_{j+1}"] = zw[i, j]
+            # Use last time in window
             row["Time"] = tw[i, -1]
             flattened_rows.append(row)
 
     if not flattened_rows:
+        print("⚠️ No flattened rows created! Writing empty CSV with headers only.")
         cols = [*(f"x_{i}" for i in range(1, window+1)),
                 *(f"y_{i}" for i in range(1, window+1)),
                 *(f"z_{i}" for i in range(1, window+1)),
@@ -95,7 +115,7 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
         return
 
     pd.DataFrame(flattened_rows).to_csv(output_path, index=False)
-
+    print(f"✅ Flattened file saved: {output_path} with {len(flattened_rows)} rows")
 # -------------------------
 # Main workflow
 # -------------------------
