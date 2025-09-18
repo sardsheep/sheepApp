@@ -1,1 +1,29 @@
 
+name: Google Drive CSV Sync
+
+on:
+  workflow_dispatch:   # run manually
+  push:
+    branches:
+      - main
+
+jobs:
+  drive-sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+      - name: Run Drive sync script
+        env:
+          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+        run: python drive_script.py
