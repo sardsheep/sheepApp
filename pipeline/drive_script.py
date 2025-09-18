@@ -12,7 +12,7 @@ import argparse
 # -------------------------
 # Google Drive utilities
 # -------------------------
-
+print(" script started")
 def get_drive_service():
     creds_dict = json.loads(os.environ["GDRIVE_CREDENTIALS"])
     creds = service_account.Credentials.from_service_account_info(
