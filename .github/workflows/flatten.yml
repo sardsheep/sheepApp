@@ -12,7 +12,6 @@ on:
 jobs:
   drive-sync:
     runs-on: ubuntu-latest
-    # Don't skip; we’ll validate inside the step.
 
     steps:
       - name: Checkout code
@@ -25,7 +24,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
       - name: Run Drive flatten script
