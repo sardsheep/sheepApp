@@ -12,7 +12,7 @@ import argparse
 # -------------------------
 # Google Drive utilities
 # -------------------------
-print(" script started")
+
 def get_drive_service():
     creds_dict = json.loads(os.environ["GDRIVE_CREDENTIALS"])
     creds = service_account.Credentials.from_service_account_info(
@@ -121,6 +121,7 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
 # -------------------------
 
 def main():
+    print(" script started")
     ap = argparse.ArgumentParser(description="Download CSV from Drive, flatten, and upload back.")
     ap.add_argument("--file-id", required=True, help="Google Drive file ID of CSV")
     ap.add_argument("--chunk-size", type=int, default=30000, help="Rows per chunk (multiple of window)")
