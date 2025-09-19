@@ -121,34 +121,37 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
 # -------------------------
 
 def main():
-    print(" script starteddddd")
-    ap = argparse.ArgumentParser(description="Download CSV from Drive, flatten, and upload back.")
+    print("🚀 script started", flush=True)
+
+    ap = argparse.ArgumentParser(
+        description="Download CSV from Drive, flatten, and upload back."
+    )
     ap.add_argument("--file-id", required=True, help="Google Drive file ID of CSV")
     ap.add_argument("--chunk-size", type=int, default=30000, help="Rows per chunk (multiple of window)")
     ap.add_argument("--window", type=int, default=30, help="Window size")
     args = ap.parse_args()
-    file_id = args.file_id or "1q5xnjIAdNEjVA_0VudvoFvydDP7Ro23a"
+
+    file_id = args.file_id.strip()
+    if not file_id:
+        raise SystemExit("Missing --file-id")
+
     service = get_drive_service()
-    local_in = Path("data.csv")
-    local_out = Path("data_flattened.csv")
 
-    print("⬇️ Downloading file from Drive...")
-    download_file(service, args.file_id, local_in)
+    work_dir = Path("work")
+    work_dir.mkdir(parents=True, exist_ok=True)
+    local_in = work_dir / "data.csv"
+    local_out = work_dir / "data_flattened.csv"
 
-    print("🔧 Flattening CSV...")
+    print(f"⬇️ Downloading file from Drive (file_id={file_id})...", flush=True)
+    download_file(service, file_id, local_in)
+
+    print("🔧 Flattening CSV...", flush=True)
     flatten_file(local_in, local_out, chunk_size=args.chunk_size, window=args.window)
 
-    print("⬆️ Uploading flattened file back to Drive...")
-    upload_file(service, local_out, args.file_id)
+    print("⬆️ Uploading flattened file back to Drive (overwriting original)...", flush=True)
+    upload_file(service, local_out, file_id)
 
-    print("✅ Done! Flattened CSV uploaded successfully.")
-
-    # Download CSV
-    download_file(service, args.file_id, local_in)
-
-    # Flatten CSV
-    flatten_file(local_in, local_out, chunk_size=args.chunk_size, window=args.window)
-
+    print("✅ Done! Flattened CSV uploaded successfully.", flush=True)
 
 
 if __name__ == "__main__":
