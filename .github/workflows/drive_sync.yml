@@ -28,7 +28,7 @@ jobs:
           GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
         run: |
           echo "Processing Drive file: ${{ github.event.client_payload.file_name }} (${{ github.event.client_payload.file_id }})"
-          python pipeline/drive_script.py --file-id "1q5xnjIAdNEjVA_0VudvoFvydDP7Ro23a"
+          python pipeline/drive_script.py --file-id "$FILE_ID"
 
           
   
