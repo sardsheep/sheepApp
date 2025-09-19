@@ -2,7 +2,7 @@ name: Google Drive CSV Sync (on new file)
 
 on:
   repository_dispatch:
-    types: [ drive-csv-added ]   # sent by Apps Script
+    types: [ drive-csv-added ]   # sent by Apps Script: payload must include client_payload.file_id
   workflow_dispatch:
     inputs:
       file_id:
@@ -27,20 +27,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
-      - name: Run Drive flatten script
-        env:
-          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+      - name: (Debug) show dispatch payload
+        run: echo 'payload=' ${{ toJson(github.event.client_payload) }}
+
+      - name: Resolve FILE_ID (dispatch → manual input)
+        id: resolve
         run: |
           set -euo pipefail
-          # Prefer repository_dispatch payload; fall back to manual input
           FILE_ID="${{ github.event.client_payload.file_id }}"
           if [ -z "${FILE_ID}" ]; then
             FILE_ID="${{ inputs.file_id }}"
           fi
           if [ -z "${FILE_ID}" ]; then
-            echo "::error::Missing file_id. If running manually, provide it in the UI. If using Apps Script, ensure it sends client_payload.file_id."
+            echo "::error::Missing file_id. If running manually, enter it in the form. If using Apps Script, make sure it sends client_payload.file_id."
             exit 1
           fi
+          echo "file_id=${FILE_ID}" >> "$GITHUB_OUTPUT"
 
-          echo "Processing Drive file: ${FILE_ID} (name: '${{ github.event.client_payload.file_name }}')"
+      - name: Run Drive flatten script
+        env:
+          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+        run: |
+          set -euo pipefail
+          FILE_ID="${{ steps.resolve.outputs.file_id }}"
+          echo "Processing Drive file: ${FILE_ID}"
           python pipeline/drive_script.py --file-id "${FILE_ID}"
