@@ -131,6 +131,17 @@ def main():
     local_in = Path("data.csv")
     local_out = Path("data_flattened.csv")
 
+    print("⬇️ Downloading file from Drive...")
+    download_file(service, args.file_id, local_in)
+
+    print("🔧 Flattening CSV...")
+    flatten_file(local_in, local_out, chunk_size=args.chunk_size, window=args.window)
+
+    print("⬆️ Uploading flattened file back to Drive...")
+    upload_file(service, local_out, args.file_id)
+
+    print("✅ Done! Flattened CSV uploaded successfully.")
+
     # Download CSV
     download_file(service, args.file_id, local_in)
 
