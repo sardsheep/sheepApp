@@ -121,13 +121,13 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
 # -------------------------
 
 def main():
-    print(" script started")
+    print(" script starteddddd")
     ap = argparse.ArgumentParser(description="Download CSV from Drive, flatten, and upload back.")
     ap.add_argument("--file-id", required=True, help="Google Drive file ID of CSV")
     ap.add_argument("--chunk-size", type=int, default=30000, help="Rows per chunk (multiple of window)")
     ap.add_argument("--window", type=int, default=30, help="Window size")
     args = ap.parse_args()
-
+    file_id = args.file_id or "1q5xnjIAdNEjVA_0VudvoFvydDP7Ro23a"
     service = get_drive_service()
     local_in = Path("data.csv")
     local_out = Path("data_flattened.csv")
