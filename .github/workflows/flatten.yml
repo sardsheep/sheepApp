@@ -2,13 +2,17 @@ name: Google Drive CSV Sync (on new file)
 
 on:
   repository_dispatch:
-    types: [ drive-csv-added ]   # we'll send this from Google Apps Script
-  workflow_dispatch:             # still let you run it manually
+    types: [ drive-csv-added ]   # sent by Apps Script
+  workflow_dispatch:
+    inputs:
+      file_id:
+        description: "Google Drive file ID (manual run)"
+        required: false
 
 jobs:
   drive-sync:
     runs-on: ubuntu-latest
-    if: ${{ github.event.client_payload.file_id != '' }}
+    # Don't skip; we’ll validate inside the step.
 
     steps:
       - name: Checkout code
@@ -20,15 +24,24 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
+        run: |
+          pip install --upgrade pip
+          pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
       - name: Run Drive flatten script
         env:
-          # You already use this in your script — keep it as-is
           GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
         run: |
-          echo "Processing Drive file: ${{ github.event.client_payload.file_name }} (${{ github.event.client_payload.file_id }})"
-          python pipeline/drive_script.py --file-id "$FILE_ID"
+          set -euo pipefail
+          # Prefer repository_dispatch payload; fall back to manual input
+          FILE_ID="${{ github.event.client_payload.file_id }}"
+          if [ -z "${FILE_ID}" ]; then
+            FILE_ID="${{ inputs.file_id }}"
+          fi
+          if [ -z "${FILE_ID}" ]; then
+            echo "::error::Missing file_id. If running manually, provide it in the UI. If using Apps Script, ensure it sends client_payload.file_id."
+            exit 1
+          fi
 
-          
-  
+          echo "Processing Drive file: ${FILE_ID} (name: '${{ github.event.client_payload.file_name }}')"
+          python pipeline/drive_script.py --file-id "${FILE_ID}"
