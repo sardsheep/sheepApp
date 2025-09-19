@@ -148,3 +148,8 @@ def main():
 
     # Flatten CSV
     flatten_file(local_in, local_out, chunk_size=args.chunk_size, window=args.window)
+
+
+
+if __name__ == "__main__":
+    main()
