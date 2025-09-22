@@ -51,4 +51,4 @@ jobs:
           set -euo pipefail
           FILE_ID="${{ steps.resolve.outputs.file_id }}"
           echo "Processing Drive file: ${FILE_ID}"
-          python pipeline/drive_script.py --file-id "${FILE_ID}"
+          python pipeline/drive_script.py --file-id "${FILE_ID}" --overwrite
