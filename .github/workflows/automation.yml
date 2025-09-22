@@ -11,7 +11,7 @@ on:
 
 # Minimal permissions (adjust if your job needs to push commits, etc.)
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: drive-csv-sync
