@@ -41,14 +41,14 @@ jobs:
       - name: (Debug) show dispatch payload
         run: echo 'payload=' ${{ toJson(github.event.client_payload) }}
 
-      - name: Resolve FILE_ID (dispatch → manual input; supports file_id or fileId)
+      - name: Resolve FILE_ID and FILE_NAME (dispatch → manual input)
         id: resolve
         shell: bash
         run: |
           set -euo pipefail
-          FILE_ID="${{ github.event.client_payload.file_id  '' }}"
+          FILE_ID="${{ github.event.client_payload.file_id || '' }}"
           if [ -z "${FILE_ID}" ]; then
-            FILE_ID="${{ github.event.client_payload.fileId  '' }}"
+            FILE_ID="${{ github.event.client_payload.fileId || '' }}"
           fi
           if [ -z "${FILE_ID}" ]; then
             FILE_ID="${{ inputs.file_id || '' }}"
@@ -57,7 +57,12 @@ jobs:
             echo "::error::Missing file_id. If running manually, enter it in the form. If calling via API/Apps Script, send client_payload.file_id or client_payload.fileId."
             exit 1
           fi
+          FILE_NAME="${{ github.event.client_payload.fileName || '' }}"
           echo "file_id=${FILE_ID}" >> "$GITHUB_OUTPUT"
+          echo "file_name=${FILE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Resolved FILE_ID=${FILE_ID}"
+          echo "Resolved FILE_NAME=${FILE_NAME}"
+
 
       - name: Configure Google Service Account (writes JSON to file)
         id: gsa
