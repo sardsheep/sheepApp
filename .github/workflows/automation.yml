@@ -22,9 +22,6 @@ jobs:
     runs-on: ubuntu-latest
 
 
-    # Resolve FILE_ID once for the whole job (repo_dispatch OR manual)
-    env:
-      FILE_ID: ${{ github.event.client_payload.file_id && github.event.client_payload.file_id || inputs.file_id }}
 
 
     steps:
