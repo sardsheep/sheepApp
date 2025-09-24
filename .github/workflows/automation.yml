@@ -2,14 +2,13 @@ name: Google Drive CSV Sync (on new file)
 
 on:
   repository_dispatch:
-    types: [ drive-csv-added ]   # send client_payload.file_id or client_payload.fileId
+    types: [drive-csv-added]   # send client_payload.file_id or client_payload.fileId
   workflow_dispatch:
     inputs:
       file_id:
         description: "Google Drive file ID (manual run)"
         required: false
 
-# Minimal permissions (adjust if your job needs to push commits, etc.)
 permissions:
   contents: write
 
@@ -20,9 +19,6 @@ concurrency:
 jobs:
   drive-sync:
     runs-on: ubuntu-latest
-
-
-
 
     steps:
       - name: Checkout code
@@ -63,95 +59,46 @@ jobs:
           echo "Resolved FILE_ID=${FILE_ID}"
           echo "Resolved FILE_NAME=${FILE_NAME}"
 
-
-      - name: Configure Google Service Account (writes JSON to file)
+      - name: Configure Google Service Account (export JSON for both clients)
         id: gsa
         env:
-          # Prefer GCP_SA_JSON; fallback to old name GDRIVE_CREDENTIALS if you used it before
           GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
-          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+          GDRIVE_CREDENTIALS_OLD: ${{ secrets.GDRIVE_CREDENTIALS }} # optional fallback
         shell: bash
         run: |
           set -euo pipefail
           JSON="${GCP_SA_JSON:-}"
-          if [ -z "${JSON}" ] && [ -n "${GDRIVE_CREDENTIALS:-}" ]; then
-            JSON="${GDRIVE_CREDENTIALS}"
+          if [ -z "${JSON}" ] && [ -n "${GDRIVE_CREDENTIALS_OLD:-}" ]; then
+            JSON="${GDRIVE_CREDENTIALS_OLD}"
           fi
           if [ -z "${JSON}" ]; then
             echo "::error::Missing service account JSON secret. Add repository secret GCP_SA_JSON (or GDRIVE_CREDENTIALS)."
             exit 1
           fi
+
+          # 1) For libraries that look for a file path:
           echo "${JSON}" > /tmp/gsa.json
-          # Export for all subsequent steps so googleapiclient picks it up automatically
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gsa.json" >> "$GITHUB_ENV"
 
-      - name: Validate file is CSV and fetch metadata
-        id: meta
+          # 2) For pipeline/drive_script.py which expects JSON string in GDRIVE_CREDENTIALS:
+          {
+            echo 'GDRIVE_CREDENTIALS<<EOF'
+            echo "${JSON}"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
+      # (Optional) quick metadata sanity-check — remove if you don't need it
+      - name: Quick sanity:resolved FILE_ID
+        run: |
+          echo "Using FILE_ID=${{ steps.resolve.outputs.file_id }}"
+          echo "Using FILE_NAME=${{ steps.resolve.outputs.file_name }}"
+
+      - name: Run Drive flatten script
         env:
           FILE_ID: ${{ steps.resolve.outputs.file_id }}
+          FILE_NAME: ${{ steps.resolve.outputs.file_name }}
+          # GDRIVE_CREDENTIALS comes from the earlier step via $GITHUB_ENV
         run: |
-          python - <<'PY'
-          import os, json, sys
-          from google.oauth2.service_account import Credentials
-          from googleapiclient.discovery import build
-
-          name: Google Drive CSV Sync (on new file)
-
-          on:
-            repository_dispatch:
-              types: [ drive-csv-added ]   # sent by Apps Script: payload must include client_payload.file_id
-            workflow_dispatch:
-              inputs:
-                file_id:
-                  description: "Google Drive file ID (manual run)"
-                  required: false
-          
-          jobs:
-            drive-sync:
-              runs-on: ubuntu-latest
-          
-              steps:
-                - name: Checkout code
-                  uses: actions/checkout@v4
-          
-                - name: Set up Python
-                  uses: actions/setup-python@v5
-                  with:
-                    python-version: "3.10"
-          
-                - name: Install dependencies
-                  run: |
-                    python -m pip install --upgrade pip
-                    pip install pandas google-api-python-client google-auth-httplib2 google-auth-oauthlib
-          
-                - name: (Debug) show dispatch payload
-                  run: echo 'payload=' ${{ toJson(github.event.client_payload) }}
-          
-                # (keep the steps above as-is)
-
-                - name: Resolve FILE_ID (dispatch → manual input; supports file_id or fileId)
-                  id: resolve
-                  shell: bash
-                  env:
-                    FILE_ID_EXPR: ${{ github.event.client_payload.file_id  github.event.client_payload.fileId  inputs.file_id }}
-                    FILE_NAME_EXPR: ${{ github.event.client_payload.fileName || '' }}
-                  run: |
-                    set -euo pipefail
-                    if [ -z "${FILE_ID_EXPR}" ]; then
-                      echo "::error::Missing file_id. For repository_dispatch, send client_payload.file_id; for manual runs, provide the input."
-                      exit 1
-                    fi
-                    echo "file_id=${FILE_ID_EXPR}" >> "$GITHUB_OUTPUT"
-                    echo "file_name=${FILE_NAME_EXPR}" >> "$GITHUB_OUTPUT"
-                    echo "Resolved FILE_ID=${FILE_ID_EXPR}"
-                    echo "Resolved FILE_NAME=${FILE_NAME_EXPR}"
-                
-                - name: Run Drive flatten script
-                  env:
-                    GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
-                    FILE_ID: ${{ steps.resolve.outputs.file_id }}
-                    FILE_NAME: ${{ steps.resolve.outputs.file_name }}
-                  run: |
-                    set -euo pipefail
-                    echo "Processing Drive file: ${FILE_NAME:-} (${FILE_ID})"
-                    python pipeline/drive_script.py --file-id "${FILE_ID}" --overwrite
+          set -euo pipefail
+          echo "Processing Drive file: ${FILE_NAME:-} (${FILE_ID})"
+          python pipeline/drive_script.py --file-id "${FILE_ID}" --overwrite
