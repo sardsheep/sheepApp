@@ -60,3 +60,13 @@ jobs:
           INPUT_MODEL_PATH: ${{ github.event.inputs.model_path }}
           INPUT_CLASS_LABELS: ${{ github.event.inputs.class_labels }}
         run: python model/predict.py
+
+      - name: Run prediction
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          INPUT_DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+          INPUT_CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
+          INPUT_MODEL_PATH: ${{ github.event.inputs.model_path }}
+          INPUT_CLASS_LABELS: ${{ github.event.inputs.class_labels }}
+          OUTPUT_MODE: update   # ← default to in-place update (no quota issues)
+        run: python model/predict.py
