@@ -14,7 +14,7 @@ on:
       model_path:
         description: "Path to the Keras .h5 model in the repo"
         required: true
-        default: "sheepApp/model/ram_blstm_model.h5"
+        default: "model/ram_blstm_model.h5"
       class_labels:
         description: "Comma-separated labels (index order). If count mismatches model output, falls back to class_0.."
         required: false
