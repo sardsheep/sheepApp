@@ -66,4 +66,4 @@ PY
           INPUT_CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
           INPUT_MODEL_PATH: ${{ github.event.inputs.model_path }}
           INPUT_CLASS_LABELS: ${{ github.event.inputs.class_labels }}
-        run: python predict.py
+        run: python model/predict.py
