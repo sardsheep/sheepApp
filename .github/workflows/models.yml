@@ -40,8 +40,9 @@ jobs:
           pip install "tensorflow-cpu>=2.13,<2.17" pandas numpy h5py \
             google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib tqdm
 
-      # Decode the base64 secret to sa.json and validate it (helps catch bad secrets early)
+      # 🔐 Decode base64 secret -> sa.json and validate (no here-docs; YAML-safe)
       - name: Write & validate service account credentials
+        shell: bash
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
@@ -49,15 +50,7 @@ jobs:
             echo "Secret GOOGLE_SERVICE_ACCOUNT_JSON_B64 is missing"; exit 1
           fi
           echo "${GOOGLE_SERVICE_ACCOUNT_JSON_B64}" | base64 --decode > sa.json
-          python - <<'PY'
-import json, sys
-try:
-    json.load(open("sa.json"))
-    print("sa.json is valid JSON.")
-except Exception as e:
-    print("Invalid sa.json:", e, file=sys.stderr)
-    sys.exit(1)
-PY
+          python -c "import json,sys; json.load(open('sa.json')); print('sa.json is valid JSON.')"
 
       - name: Run prediction
         env:
