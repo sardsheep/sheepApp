@@ -28,17 +28,14 @@ def drive_client(sa_path: str = "sa.json"):
 
 
 def find_csv_in_folder(service, folder_id: str, filename: str = ""):
-    """
-    Return (file_id, file_name). If filename empty, pick most recently modified CSV in the folder.
-    """
+    """Return (file_id, file_name). If filename empty, pick most recently modified CSV."""
     if filename:
         q = f"'{folder_id}' in parents and name = '{filename}' and mimeType = 'text/csv' and trashed = false"
     else:
         q = f"'{folder_id}' in parents and mimeType = 'text/csv' and trashed = false"
 
     resp = service.files().list(
-        q=q, orderBy="modifiedTime desc",
-        fields="files(id,name,modifiedTime,size,mimeType)"
+        q=q, orderBy="modifiedTime desc", fields="files(id,name,modifiedTime,size,mimeType)"
     ).execute()
     files = resp.get("files", [])
     if not files:
@@ -82,10 +79,9 @@ def detect_xyz_columns(columns):
 
 def build_input_tensor(df: pd.DataFrame):
     """
-    If a wide format (x_1..z_T) is found, return (X, T) with shape [N, T, 3].
+    From wide format x_1..z_T create [N, T, 5] = [x, y, z, magnitude, delta_magnitude].
     Drops obvious metadata columns if present.
     """
-    # drop metadata-like columns if present (adjust if your CSV differs)
     for c in ["sheep number", "real Time"]:
         if c in df.columns:
             df = df.drop(columns=[c])
@@ -99,8 +95,14 @@ def build_input_tensor(df: pd.DataFrame):
     Xx = df[xs].to_numpy(dtype=np.float32).reshape(N, T)
     Xy = df[ys].to_numpy(dtype=np.float32).reshape(N, T)
     Xz = df[zs].to_numpy(dtype=np.float32).reshape(N, T)
-    X = np.stack([Xx, Xy, Xz], axis=2)  # [N, T, 3]
-    return X, T, df  # return df (potentially column-dropped) for consistency
+
+    # ---- EXTRA FEATURES (to reach 5 channels) ----
+    mag = np.sqrt(Xx**2 + Xy**2 + Xz**2)                  # [N, T]
+    dmag = np.concatenate([np.zeros((N, 1), np.float32),  # [N, T] diff along time with leading 0
+                           np.diff(mag, axis=1).astype(np.float32)], axis=1)
+
+    X = np.stack([Xx, Xy, Xz, mag, dmag], axis=2).astype(np.float32)  # [N, T, 5]
+    return X, T
 
 
 def main():
@@ -112,7 +114,7 @@ def main():
     if not folder_id:
         raise RuntimeError("INPUT_DRIVE_FOLDER_ID is required.")
     if not model_path:
-        raise RuntimeError("INPUT_MODEL_PATH is required (e.g., sheepApp/model/ram_blstm_model.h5).")
+        raise RuntimeError("INPUT_MODEL_PATH is required (e.g., model/ram_blstm_model.h5).")
 
     service = drive_client()
     file_id, file_name = find_csv_in_folder(service, folder_id, csv_filename)
@@ -123,15 +125,18 @@ def main():
     download_file(service, file_id, in_csv)
 
     # Load data
-    df_raw = pd.read_csv(in_csv)
-    df_out = df_raw.copy()  # keep original columns for output
+    df = pd.read_csv(in_csv)
+    df_out = df.copy()  # preserve original columns
 
     # Build model input
-    X, T, _ = build_input_tensor(df_raw)
+    X, T = build_input_tensor(df)
     print(f"Detected wide xyz format with T={T}; input tensor shape: {X.shape}")
 
     # Load model and predict
     print(f"Loading model from {model_path}")
+    if not os.path.exists(model_path):
+        print("Current working dir:", os.getcwd())
+        raise FileNotFoundError(f"Model file not found at '{model_path}'. Check workflow input 'model_path'.")
     model = load_model(model_path)
     raw = model.predict(X, verbose=0)
 
