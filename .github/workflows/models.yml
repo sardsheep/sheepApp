@@ -1,3 +1,5 @@
+
+
 name: Predict behavior from Drive CSV and save back
 
 on:
@@ -18,7 +20,7 @@ on:
       class_labels:
         description: "Comma-separated labels (index order). If count mismatches model output, falls back to class_0.."
         required: false
-        default: "grazing,ruminating,walking,other"
+        default: "grazing,ruminating,walking,other"    
 
 jobs:
   run-prediction:
@@ -52,14 +54,12 @@ jobs:
           echo "${GOOGLE_SERVICE_ACCOUNT_JSON_B64}" | base64 --decode > sa.json
           python -c "import json,sys; json.load(open('sa.json')); print('sa.json is valid JSON.')"
 
-      - name: Run prediction
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
-          INPUT_DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
-          INPUT_CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
-          INPUT_MODEL_PATH: ${{ github.event.inputs.model_path }}
-          INPUT_CLASS_LABELS: ${{ github.event.inputs.class_labels }}
-        run: python model/predict.py
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "tensorflow-cpu>=2.13,<2.17" pandas numpy h5py joblib scikit-learn \
+            google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib tqdm
+
 
       - name: Run prediction
         env:
@@ -68,5 +68,9 @@ jobs:
           INPUT_CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
           INPUT_MODEL_PATH: ${{ github.event.inputs.model_path }}
           INPUT_CLASS_LABELS: ${{ github.event.inputs.class_labels }}
-          OUTPUT_MODE: update   # ← default to in-place update (no quota issues)
+          INPUT_SCALER_PATH: artifacts/scaler.joblib
+          INPUT_FEATURECOLS_PATH: artifacts/feature_cols.joblib
+          INPUT_LABELENC_PATH: artifacts/label_encoder.joblib
+          OUTPUT_MODE: update   # safe default
         run: python model/predict.py
+
