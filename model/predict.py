@@ -1,6 +1,7 @@
 import os, io, re, json, base64
 import numpy as np
 import pandas as pd
+import joblib
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -103,35 +104,162 @@ def build_input_tensor(df: pd.DataFrame):
     return X, T
 
 
-def main():
-    folder_id     = os.getenv("INPUT_DRIVE_FOLDER_ID")
-    csv_filename  = os.getenv("INPUT_CSV_FILENAME", "").strip()
-    model_path    = os.getenv("INPUT_MODEL_PATH")
-    class_labels  = [c.strip() for c in os.getenv("INPUT_CLASS_LABELS", "").split(",") if c.strip()]
-    output_mode   = os.getenv("OUTPUT_MODE", "update").lower()  # 'update' (default) or 'create'
+# --- New: recreate training-time features on an unlabeled df ---
+def engineer_features_like_training(df: pd.DataFrame) -> pd.DataFrame:
+    # Match your training drops/renames
+    df = df.copy()
+    df.drop(columns=["sheep number", "video_time", "real Time"], inplace=True, errors="ignore")
+    df.rename(columns={"behaivour": "behaviour"}, inplace=True)  # harmless if absent
+    if "behaviour" in df.columns:
+        df = df.drop(columns=["behaviour"])  # inference has no labels
 
+    # Magnitude per step
+    for i in range(1, 31):
+        df[f"mag_{i}"] = np.sqrt(df[f"x_{i}"]**2 + df[f"y_{i}"]**2 + df[f"z_{i}"]**2)
+
+    # Delta magnitude per step (last step = 0)
+    for i in range(1, 30):
+        df[f"delta_mag_{i}"] = (df[f"mag_{i+1}"] - df[f"mag_{i}"]).abs()
+
+    # Aggregates (training had these)
+    mag_cols   = [f"mag_{i}" for i in range(1, 31)]
+    delta_cols = [f"delta_mag_{i}" for i in range(1, 30)]
+    df["mag_mean"]   = df[mag_cols].mean(axis=1)
+    df["mag_std"]    = df[mag_cols].std(axis=1)
+    df["delta_mean"] = df[delta_cols].mean(axis=1)
+    df["delta_std"]  = df[delta_cols].std(axis=1)
+
+    return df
+
+# --- New: build sequence from *scaled* flat vector using saved feature_cols order ---
+def to_sequence_from_scaled(X_scaled: np.ndarray, feature_cols: list[str]) -> np.ndarray:
+    X_seq = []
+    for row in X_scaled:
+        sample = []
+        for i in range(1, 31):
+            x_idx = feature_cols.index(f"x_{i}")
+            y_idx = feature_cols.index(f"y_{i}")
+            z_idx = feature_cols.index(f"z_{i}")
+            m_idx = feature_cols.index(f"mag_{i}")
+            d = row[feature_cols.index(f"delta_mag_{i}")] if i < 30 else 0.0
+            sample.append([row[x_idx], row[y_idx], row[z_idx], row[m_idx], d])
+        X_seq.append(sample)
+    return np.asarray(X_seq, dtype=np.float32)
+
+
+
+
+def main():
+    import os
+    import numpy as np
+    import pandas as pd
+    import joblib
+    from tensorflow.keras.models import load_model
+
+    # ---- Inputs (from env) ----
+    folder_id        = os.getenv("INPUT_DRIVE_FOLDER_ID")
+    csv_filename     = os.getenv("INPUT_CSV_FILENAME", "").strip()
+    model_path       = os.getenv("INPUT_MODEL_PATH")
+    class_labels_env = [c.strip() for c in os.getenv("INPUT_CLASS_LABELS", "").split(",") if c.strip()]
+    output_mode      = os.getenv("OUTPUT_MODE", "update").lower()  # 'update' | 'create'
+
+    scaler_path      = os.getenv("INPUT_SCALER_PATH", "artifacts/scaler.joblib")
+    featcols_path    = os.getenv("INPUT_FEATURECOLS_PATH", "artifacts/feature_cols.joblib")
+    labelenc_path    = os.getenv("INPUT_LABELENC_PATH", "artifacts/label_encoder.joblib")  # optional
+
+    # ---- Validate required inputs ----
     if not folder_id:
         raise RuntimeError("INPUT_DRIVE_FOLDER_ID is required.")
     if not model_path:
         raise RuntimeError("INPUT_MODEL_PATH is required (e.g., model/ram_blstm_model.h5).")
 
+    # ---- Drive: find & download CSV ----
     service = drive_client()
     file_id, file_name = find_csv_in_folder(service, folder_id, csv_filename)
     print(f"Using CSV: {file_name} (id={file_id})")
 
-    # Download CSV
     in_csv = "input.csv"
     download_file(service, file_id, in_csv)
 
-    # Load data
-    df = pd.read_csv(in_csv)
-    df_out = df.copy()
+    # ---- Load raw data ----
+    df_raw = pd.read_csv(in_csv)
+    df_out = df_raw.copy()
 
-    # Build model input
-    X, T = build_input_tensor(df)
-    print(f"Detected wide xyz format with T={T}; input tensor shape: {X.shape}")
+    # ---- Load artifacts (must match training) ----
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(f"Missing scaler at '{scaler_path}'. Save it during training with joblib.dump(scaler, ...).")
+    if not os.path.exists(featcols_path):
+        raise FileNotFoundError(f"Missing feature_cols at '{featcols_path}'. Save it during training (df.drop(['behaviour'],1).columns.tolist()).")
 
-    # Load model and predict
+    scaler       = joblib.load(scaler_path)
+    feature_cols = joblib.load(featcols_path)
+    le = joblib.load(labelenc_path) if os.path.exists(labelenc_path) else None
+
+    # ---- Recreate training-time features on the new CSV ----
+    df = df_raw.copy()
+    # Same drops/renames as training
+    df.drop(columns=["sheep number", "video_time", "real Time"], inplace=True, errors="ignore")
+    df.rename(columns={"behaivour": "behaviour"}, inplace=True)
+    if "behaviour" in df.columns:
+        df.drop(columns=["behaviour"], inplace=True)
+
+    # Determine expected T from training feature list (e.g., x_1..x_30)
+    def max_t_from_feats(cols):
+        import re
+        ts = []
+        for c in cols:
+            m = re.match(r"^[xyz]_(\d+)$", c)
+            if m:
+                ts.append(int(m.group(1)))
+        return max(ts) if ts else 0
+
+    T_expected = max_t_from_feats(feature_cols)
+    if T_expected <= 0:
+        raise RuntimeError("Could not infer sequence length T from feature_cols. Check your saved artifacts.")
+
+    # Check required base columns exist in the CSV
+    missing_base = [c for i in range(1, T_expected+1) for c in (f"x_{i}", f"y_{i}", f"z_{i}") if c not in df.columns]
+    if missing_base:
+        raise KeyError(f"CSV is missing required accelerometer columns from training: {missing_base[:6]}{'...' if len(missing_base)>6 else ''}")
+
+    # Magnitude per step
+    for i in range(1, T_expected+1):
+        df[f"mag_{i}"] = np.sqrt(df[f"x_{i}"]**2 + df[f"y_{i}"]**2 + df[f"z_{i}"]**2)
+
+    # Delta magnitude (last step = 0 in training code)
+    for i in range(1, T_expected):
+        df[f"delta_mag_{i}"] = (df[f"mag_{i+1}"] - df[f"mag_{i}"]).abs()
+
+    # Aggregates (must match training)
+    mag_cols   = [f"mag_{i}" for i in range(1, T_expected+1)]
+    delta_cols = [f"delta_mag_{i}" for i in range(1, T_expected)]
+    df["mag_mean"]   = df[mag_cols].mean(axis=1)
+    df["mag_std"]    = df[mag_cols].std(axis=1)
+    df["delta_mean"] = df[delta_cols].mean(axis=1) if delta_cols else 0.0
+    df["delta_std"]  = df[delta_cols].std(axis=1)  if delta_cols else 0.0
+
+    # ---- Align column order exactly as training and scale ----
+    # This will raise if the CSV doesn't have a column expected by training (which is good!)
+    X_flat = df[feature_cols].to_numpy(dtype=np.float32)
+    X_scaled = scaler.transform(X_flat)
+
+    # ---- Build (N, T, 5) sequence from the *scaled* vector using feature_cols indices ----
+    idx_cache = {name: feature_cols.index(name) for name in feature_cols}  # speed-up
+    X_seq = []
+    for row in X_scaled:
+        sample = []
+        for i in range(1, T_expected+1):
+            x = row[idx_cache[f"x_{i}"]]
+            yv = row[idx_cache[f"y_{i}"]]
+            z  = row[idx_cache[f"z_{i}"]]
+            m  = row[idx_cache[f"mag_{i}"]]
+            d  = row[idx_cache[f"delta_mag_{i}"]] if i < T_expected and f"delta_mag_{i}" in idx_cache else 0.0
+            sample.append([x, yv, z, m, d])
+        X_seq.append(sample)
+    X = np.asarray(X_seq, dtype=np.float32)
+    print(f"Prepared input tensor: {X.shape} (N, T={T_expected}, 5)")
+
+    # ---- Load model & predict ----
     print(f"Loading model from {model_path}")
     if not os.path.exists(model_path):
         print("Current working dir:", os.getcwd())
@@ -139,31 +267,40 @@ def main():
     model = load_model(model_path)
     raw = model.predict(X, verbose=0)
 
-    # Map predictions to labels
+    # ---- Map predictions to labels (+ confidence) ----
     if raw.ndim == 2 and raw.shape[1] > 1:
         n_classes = raw.shape[1]
         idx = np.argmax(raw, axis=1)
-        if class_labels and len(class_labels) == n_classes:
-            labels = [class_labels[int(i)] for i in idx]
+        conf = raw.max(axis=1)
+        if le is not None and len(le.classes_) == n_classes:
+            labels = [str(le.classes_[i]) for i in idx]
+        elif class_labels_env and len(class_labels_env) == n_classes:
+            labels = [class_labels_env[i] for i in idx]
         else:
-            if class_labels and len(class_labels) != n_classes:
-                print(f"Provided class_labels ({len(class_labels)}) != model outputs ({n_classes}); using class_0..")
-            labels = [f"class_{int(i)}" for i in idx]
+            if class_labels_env and len(class_labels_env) != n_classes:
+                print(f"Provided class_labels ({len(class_labels_env)}) != model outputs ({n_classes}); falling back to class_#.")
+            labels = [f"class_{i}" for i in idx]
     else:
-        idx = (raw.ravel() >= 0.5).astype(int)
-        if class_labels and len(class_labels) >= 2:
-            labels = [class_labels[int(i)] for i in idx]
+        # Binary fallback
+        pred = raw.ravel()
+        idx = (pred >= 0.5).astype(int)
+        conf = np.where(idx == 1, pred, 1.0 - pred)
+        if class_labels_env and len(class_labels_env) >= 2:
+            labels = [class_labels_env[i] for i in idx]
+        elif le is not None and len(le.classes_) >= 2:
+            labels = [str(le.classes_[i]) for i in idx]
         else:
-            labels = [f"class_{int(i)}" for i in idx]
+            labels = [f"class_{i}" for i in idx]
 
-    # Save output locally
+    # ---- Save predictions locally ----
     base, ext = os.path.splitext(file_name)
     out_name = f"{base}_predicted.csv"
     df_out["predict"] = labels
+    df_out["confidence"] = conf
     df_out.to_csv(out_name, index=False)
     print(f"Saved predictions to {out_name}")
 
-    # Upload logic
+    # ---- Upload back to Drive ----
     try:
         if output_mode == "create":
             print("OUTPUT_MODE=create → attempting to create a new file...")
@@ -176,7 +313,6 @@ def main():
             print(f"Uploaded (update): {updated.get('name')} (id={updated.get('id')})")
             print(f"Web link: {updated.get('webViewLink')}")
     except HttpError as e:
-        # Fallback: if quota error on create, update the original instead
         if output_mode == "create" and e.resp.status == 403 and b"storageQuotaExceeded" in e.content:
             print("Create failed due to service account quota. Falling back to update-in-place...")
             updated = upload_update(service, file_id, out_name, None)
@@ -184,6 +320,7 @@ def main():
             print(f"Web link: {updated.get('webViewLink')}")
         else:
             raise
+
 
 
 if __name__ == "__main__":
