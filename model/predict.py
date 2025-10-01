@@ -2,6 +2,7 @@ import os, io, re, json, base64
 import numpy as np
 import pandas as pd
 import joblib
+from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -9,6 +10,8 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from googleapiclient.errors import HttpError
 
 from tensorflow.keras.models import load_model
+
+scaler_path = Path(os.getenv("SCALER_PATH", "artifacts/scaler.joblib"))
 
 DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
