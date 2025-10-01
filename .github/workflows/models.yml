@@ -74,3 +74,9 @@ jobs:
           OUTPUT_MODE: update   # safe default
         run: python model/predict.py
 
+
+
+      - name: Run predict
+        env:
+          SCALER_PATH: model/artifacts/scaler.joblib
+        run: python model/predict.py
