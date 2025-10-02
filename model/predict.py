@@ -80,42 +80,16 @@ def detect_xyz_columns(columns):
     return T, xs, ys, zs
 
 
-def build_input_tensor(df: pd.DataFrame):
-    for c in ["sheep number", "real Time"]:
-        if c in df.columns:
-            df = df.drop(columns=[c])
-
-    cols = list(df.columns)
-    T, xs, ys, zs = detect_xyz_columns(cols)
-    if T < 3:
-        raise ValueError("Could not auto-detect x_i,y_i,z_i columns like x_1..z_T.")
-
-    N = len(df)
-    Xx = df[xs].to_numpy(dtype=np.float32).reshape(N, T)
-    Xy = df[ys].to_numpy(dtype=np.float32).reshape(N, T)
-    Xz = df[zs].to_numpy(dtype=np.float32).reshape(N, T)
-
-    mag = np.sqrt(Xx**2 + Xy**2 + Xz**2)
-    dmag = np.concatenate([np.zeros((N, 1), np.float32), np.diff(mag, axis=1).astype(np.float32)], axis=1)
-
-    X = np.stack([Xx, Xy, Xz, mag, dmag], axis=2).astype(np.float32)  # [N, T, 5]
-    return X, T
-
-
-# --- (kept for reference) recreate training-time features on an unlabeled df ---
 def engineer_features_like_training(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.drop(columns=["sheep number", "video_time", "real Time"], inplace=True, errors="ignore")
     df.rename(columns={"behaivour": "behaviour"}, inplace=True)
     if "behaviour" in df.columns:
         df = df.drop(columns=["behaviour"])
-
     for i in range(1, 31):
         df[f"mag_{i}"] = np.sqrt(df[f"x_{i}"]**2 + df[f"y_{i}"]**2 + df[f"z_{i}"]**2)
-
     for i in range(1, 30):
         df[f"delta_mag_{i}"] = (df[f"mag_{i+1}"] - df[f"mag_{i}"]).abs()
-
     mag_cols   = [f"mag_{i}" for i in range(1, 31)]
     delta_cols = [f"delta_mag_{i}" for i in range(1, 30)]
     df["mag_mean"]   = df[mag_cols].mean(axis=1)
@@ -150,20 +124,37 @@ def main():
     df_raw = pd.read_csv(in_csv)
     df_out = df_raw.copy()
 
-    # ---- Load preprocessing bundle (ONE file) ----
+    # ---- Load preprocessing bundle (ONE file), or auto-build it ----
     model_dir = Path(model_path).parent
     preproc_path = os.getenv("PREPROC_PATH", str(model_dir / "preproc.joblib"))
 
     if not os.path.exists(preproc_path):
-        import glob
-        print("Current working dir:", os.getcwd())
-        print("Top-level entries:", os.listdir("."))
-        print("*.joblib found:", glob.glob("**/*.joblib", recursive=True))
-        raise FileNotFoundError(
-            f"Missing preprocessing bundle at '{preproc_path}'. "
-            "Place 'preproc.joblib' next to the model or set PREPROC_PATH."
-        )
+        # Try to build from known artifact locations
+        candidates = [
+            ("model/artifacts/scaler.joblib", "model/artifacts/feature_cols.joblib", "model/artifacts/label_encoder.joblib"),
+            ("artifacts/scaler.joblib",       "artifacts/feature_cols.joblib",       "artifacts/label_encoder.joblib"),
+        ]
+        built = False
+        for s_path, f_path, l_path in candidates:
+            if os.path.exists(s_path) and os.path.exists(f_path):
+                scaler = joblib.load(s_path)
+                feature_cols = joblib.load(f_path)
+                le = joblib.load(l_path) if os.path.exists(l_path) else None
+                Path(preproc_path).parent.mkdir(parents=True, exist_ok=True)
+                joblib.dump({"scaler": scaler, "feature_cols": feature_cols, "label_encoder": le}, preproc_path)
+                print(f"Auto-created preprocessing bundle at {preproc_path} from '{s_path}' and '{f_path}'.")
+                built = True
+                break
+        if not built:
+            import glob
+            print("Current working dir:", os.getcwd())
+            print("Top-level entries:", os.listdir("."))
+            print("*.joblib found:", glob.glob("**/*.joblib", recursive=True))
+            raise FileNotFoundError(
+                f"Missing preprocessing bundle at '{preproc_path}' and could not auto-build it."
+            )
 
+    # Load bundle
     bundle = joblib.load(preproc_path)
     scaler = bundle["scaler"]
     feature_cols = bundle["feature_cols"]
@@ -217,7 +208,7 @@ def main():
     X_scaled = scaler.transform(X_flat)
 
     # ---- Build (N, T, 5) sequence from the *scaled* vector ----
-    idx_cache = {name: i for i, name in enumerate(feature_cols)}  # fast lookup
+    idx_cache = {name: i for i, name in enumerate(feature_cols)}
     X_seq = []
     for row in X_scaled:
         sample = []
@@ -226,7 +217,7 @@ def main():
             yv = row[idx_cache[f"y_{i}"]]
             z  = row[idx_cache[f"z_{i}"]]
             m  = row[idx_cache[f"mag_{i}"]]
-            d  = row[idx_cache[f"delta_mag_{i}"]] if i < T_expected and f"delta_mag_{i}" in idx_cache else 0.0
+            d  = row[idx_cache.get(f"delta_mag_{i}", -1)] if i < T_expected and f"delta_mag_{i}" in idx_cache else 0.0
             sample.append([x, yv, z, m, d])
         X_seq.append(sample)
     X = np.asarray(X_seq, dtype=np.float32)
@@ -281,7 +272,7 @@ def main():
             print(f"Web link: {created.get('webViewLink')}")
         else:
             print("OUTPUT_MODE=update → overwriting the original file content...")
-            updated = upload_update(service, file_id, out_name, None)  # keep same name
+            updated = upload_update(service, file_id, out_name, None)
             print(f"Uploaded (update): {updated.get('name')} (id={updated.get('id')})")
             print(f"Web link: {updated.get('webViewLink')}")
     except HttpError as e:
