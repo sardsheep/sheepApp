@@ -70,23 +70,22 @@ jobs:
 
       - name: Create preproc bundle if missing
         run: |
-         python - <<'PY'
-         import os, joblib
-         from pathlib import Path
-
-          bundle_path = Path("model/preproc.joblib")
-          if bundle_path.exists():
-              print("preproc.joblib already exists")
+          python - <<'PY'
+          import joblib
+          from pathlib import Path
+          p = Path('model/preproc.joblib')
+          if p.exists():
+            print('preproc.joblib already exists')
           else:
-              scaler = joblib.load("model/artifacts/scaler.joblib")
-              feature_cols = joblib.load("model/artifacts/feature_cols.joblib")
-              le_path = Path("model/artifacts/label_encoder.joblib")
-              le = joblib.load(le_path) if le_path.exists() else None
-              bundle = {"scaler": scaler, "feature_cols": feature_cols, "label_encoder": le}
-              bundle_path.parent.mkdir(parents=True, exist_ok=True)
-              joblib.dump(bundle, bundle_path)
-              print(f"Created {bundle_path}")
+            scaler = joblib.load('model/artifacts/scaler.joblib')
+            feature_cols = joblib.load('model/artifacts/feature_cols.joblib')
+            le_path = Path('model/artifacts/label_encoder.joblib')
+            le = joblib.load(le_path) if le_path.exists() else None
+            p.parent.mkdir(parents=True, exist_ok=True)
+            joblib.dump({'scaler': scaler, 'feature_cols': feature_cols, 'label_encoder': le}, p)
+            print(f'Created {p}')
           PY
+
 
 
 
