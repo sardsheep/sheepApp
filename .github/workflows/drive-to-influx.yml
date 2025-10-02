@@ -1,0 +1,170 @@
+name: Push labeled CSV from Drive to InfluxDB Cloud
+
+on:
+  workflow_dispatch:
+    inputs:
+      drive_folder_id:
+        description: "Google Drive folder ID containing labeled CSV(s)"
+        required: true
+      csv_filename:
+        description: "Exact CSV name (leave empty to take the most recent)"
+        required: false
+        default: ""
+      name_contains:
+        description: "When empty filename, filter by substring (e.g., _predicted.csv)"
+        required: false
+        default: "_predicted.csv"
+      download_all:
+        description: "Ingest all matching files? (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  drive_to_influx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib \
+                      influxdb-client pandas pytz
+
+      - name: Write & validate SA
+        shell: bash
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+        run: |
+          [ -n "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" ] || { echo "Missing secret GOOGLE_SERVICE_ACCOUNT_JSON_B64"; exit 1; }
+          echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 --decode > sa.json
+          python -c "import json; json.load(open('sa.json')); print('sa.json ok')"
+
+      - name: Download labeled CSV(s) from Drive
+        env:
+          DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+          CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
+          NAME_CONTAINS: ${{ github.event.inputs.name_contains }}
+          DOWNLOAD_ALL: ${{ github.event.inputs.download_all }}
+        run: |
+          python - <<'PY'
+import os, io
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+FILENAME  = os.environ.get("CSV_FILENAME","").strip()
+CONTAINS  = os.environ.get("NAME_CONTAINS","").strip()
+DOWNLOAD_ALL = os.environ.get("DOWNLOAD_ALL","false").lower() == "true"
+
+creds = service_account.Credentials.from_service_account_file("sa.json", scopes=["https://www.googleapis.com/auth/drive.readonly"])
+svc = build("drive","v3",credentials=creds)
+
+if FILENAME:
+    q = f"'{FOLDER_ID}' in parents and name = '{FILENAME}' and mimeType = 'text/csv' and trashed = false"
+elif CONTAINS:
+    q = f"'{FOLDER_ID}' in parents and name contains '{CONTAINS}' and mimeType = 'text/csv' and trashed = false"
+else:
+    q = f"'{FOLDER_ID}' in parents and mimeType = 'text/csv' and trashed = false"
+
+resp = svc.files().list(q=q, orderBy="modifiedTime desc", fields="files(id,name,modifiedTime)").execute()
+files = resp.get("files", [])
+if not files: raise SystemExit("No matching CSVs found.")
+targets = files if DOWNLOAD_ALL else [files[0]]
+
+with open("downloaded_list.txt","w") as out:
+    for f in targets:
+        req = svc.files().get_media(fileId=f["id"])
+        with open(f["name"],"wb") as fh:
+            dl = MediaIoBaseDownload(fh, req)
+            done = False
+            while not done: _, done = dl.next_chunk()
+        print("DOWNLOADED::", f["name"])
+        out.write(f["name"]+"\n")
+PY
+
+      - name: Create ingest script
+        run: |
+          python - <<'PY'
+from pathlib import Path
+Path("tools").mkdir(exist_ok=True)
+Path("tools/ingest_influx.py").write_text(r'''
+import os, sys, pandas as pd, pytz
+from pathlib import Path
+from influxdb_client import InfluxDBClient, Point, WriteOptions
+from influxdb_client.client.write.point import WritePrecision
+
+URL    = os.getenv("INFLUX_URL")
+TOKEN  = os.getenv("INFLUX_TOKEN")
+ORG    = os.getenv("INFLUX_ORG")
+BUCKET = os.getenv("INFLUX_BUCKET")
+MODEL_VERSION = os.getenv("MODEL_VERSION","unknown")
+
+def ts_col(df):
+    for c in ["timestamp","time","real Time","real_time","video_time"]:
+        if c in df.columns: return c
+    return None
+
+def parse_ts(s):
+    s = pd.to_datetime(s, errors="coerce", utc=False, infer_datetime_format=True)
+    if getattr(s.dt, "tz", None) is None:
+        import pytz
+        s = s.dt.tz_localize(pytz.timezone("Europe/Rome"), nonexistent="shift_forward", ambiguous="NaT").dt.tz_convert("UTC")
+    else:
+        s = s.dt.tz_convert("UTC")
+    return s
+
+def points(df, src):
+    tcol = ts_col(df)
+    if not tcol: raise ValueError("No timestamp column found.")
+    t = parse_ts(df[tcol])
+    if t.isna().all(): raise ValueError(f"Unparseable timestamps in '{tcol}'.")
+    sheep = next((c for c in ["sheep number","sheep_id","sheep"] if c in df.columns), None)
+    if "predict" not in df.columns: raise ValueError("Missing 'predict' column.")
+    if "confidence" not in df.columns: raise ValueError("Missing 'confidence' column.")
+    for i, row in df.iterrows():
+        if pd.isna(t.iloc[i]): continue
+        p = Point("sheep_behavior_pred") \
+              .tag("label", str(row["predict"])) \
+              .tag("source", src) \
+              .tag("model_version", MODEL_VERSION) \
+              .field("confidence", float(row["confidence"])) \
+              .time(t.iloc[i].to_pydatetime(), WritePrecision.NS)
+        if sheep and pd.notna(row[sheep]):
+            p = p.tag("sheep_id", str(row[sheep]))
+        yield p
+
+def ingest(paths):
+    with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
+        w = client.write_api(write_options=WriteOptions(batch_size=5000, flush_interval=5000))
+        for p in paths:
+            df = pd.read_csv(p)
+            recs = list(points(df, Path(p).name))
+            if recs:
+                w.write(bucket=BUCKET, record=recs)
+                print(f"Wrote {len(recs)} points from {p}")
+        w.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python tools/ingest_influx.py file1.csv [file2.csv ...]"); sys.exit(2)
+    ingest(sys.argv[1:])
+''')
+print("Ingest script ready.")
+PY
+
+      - name: Ingest to InfluxDB Cloud
+        env:
+          INFLUX_URL: ${{ secrets.INFLUX_URL }}
+          INFLUX_TOKEN: ${{ secrets.INFLUX_TOKEN }}   # WRITE token
+          INFLUX_ORG: ${{ secrets.INFLUX_ORG }}
+          INFLUX_BUCKET: ${{ secrets.INFLUX_BUCKET }}
+          MODEL_VERSION: drive-to-influx
+        run: |
+          test -s downloaded_list.txt || { echo "No files downloaded."; exit 1; }
+          xargs -a downloaded_list.txt python tools/ingest_influx.py
