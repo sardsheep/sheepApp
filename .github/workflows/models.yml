@@ -66,6 +66,36 @@ jobs:
           print('sa.json is valid JSON.')
           PY
 
+
+
+      - name: Create preproc bundle if missing
+        run: |
+         python - <<'PY'
+         import os, joblib
+         from pathlib import Path
+
+          bundle_path = Path("model/preproc.joblib")
+          if bundle_path.exists():
+              print("preproc.joblib already exists")
+          else:
+              scaler = joblib.load("model/artifacts/scaler.joblib")
+              feature_cols = joblib.load("model/artifacts/feature_cols.joblib")
+              le_path = Path("model/artifacts/label_encoder.joblib")
+              le = joblib.load(le_path) if le_path.exists() else None
+              bundle = {"scaler": scaler, "feature_cols": feature_cols, "label_encoder": le}
+              bundle_path.parent.mkdir(parents=True, exist_ok=True)
+              joblib.dump(bundle, bundle_path)
+              print(f"Created {bundle_path}")
+          PY
+
+
+
+
+
+
+
+
+
       - name: Run prediction
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
