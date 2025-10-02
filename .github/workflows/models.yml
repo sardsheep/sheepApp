@@ -1,6 +1,8 @@
+
 name: Predict behavior from Drive CSV and save back
 
 on:
+  
   workflow_dispatch:
     inputs:
       drive_folder_id:
@@ -19,7 +21,16 @@ on:
         description: "Comma-separated labels (index order)"
         required: false
         default: "grazing,ruminating,walking,other"
+  schedule:
+    - cron: "*/5 * * * *"   # runs every 5 minutes (UTC)
 
+
+# prevent overlapping runs if one takes >5 mins
+concurrency:
+  group: predict-${{ github.ref }}
+  cancel-in-progress: false
+
+  
 jobs:
   run-prediction:
     runs-on: ubuntu-latest
@@ -50,10 +61,10 @@ jobs:
           fi
           echo "${GOOGLE_SERVICE_ACCOUNT_JSON_B64}" | base64 --decode > sa.json
           python - << 'PY'
-import json
-json.load(open('sa.json'))
-print('sa.json is valid JSON.')
-PY
+          import json
+          json.load(open('sa.json'))
+          print('sa.json is valid JSON.')
+          PY
 
       - name: Run prediction
         env:
