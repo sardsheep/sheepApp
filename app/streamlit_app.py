@@ -4,7 +4,8 @@
 import streamlit as st
 import pandas as pd
 from influxdb_client import InfluxDBClient
-from influxdb_client_3 import InfluxDBClient3  # SQL client
+#from influxdb_client_3 import InfluxDBClient3  # SQL client
+
 st.set_page_config(page_title="Sheep Behavior (diagnostic)", layout="wide")
 st.title("🐑 Sheep Behavior — InfluxDB Cloud diagnostic")
 
