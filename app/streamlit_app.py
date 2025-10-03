@@ -60,7 +60,7 @@ st.subheader("SQL")
 st.code(sql, language="sql")
 
 try:
-    with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
+    with InfluxDBClient(host=URL, token=TOKEN, org=ORG, database=DB) as client:
         df: pd.DataFrame = client.query(sql)
     if df.empty:
         st.info("No rows returned. Try a smaller Sheep ID, increase the window, or confirm recent data exists (remember Free plan ≈ 30 days).")
