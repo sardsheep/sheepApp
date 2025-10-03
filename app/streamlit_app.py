@@ -51,13 +51,14 @@ if label:
     filters.append(f'  |> filter(fn: (r) => r["label"] == "{label}")')
 flt_block = "\n".join(filters)
 
-flux = f'''
-from(bucket: "{BUCKET}")
-  |> range(start: -{hours}h)
-  |> filter(fn: (r) => r._measurement == "sheep_behavior_pred")
-  |> filter(fn: (r) => r._field == "confidence")
-{flt_block}
-  |> limit(n: 5)
+sql = f"""
+SELECT time, confidence, label, sheep_id
+FROM sheep_behavior_pred
+WHERE sheep_id = '{sheep_id}'
+  AND time >= now() - INTERVAL '{days} days'
+ORDER BY time DESC
+LIMIT 1;
+"""limit(n: 5)
 '''
 
 st.code(flux, language="flux")
