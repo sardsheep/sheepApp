@@ -1,18 +1,19 @@
 import streamlit as st
 import pandas as pd
-from influxdb_client import InfluxDBClient            # v2 client (for health check)
-from influxdb_client_3 import InfluxDBClient3         # v3 client (for SQL)
+import pyarrow as pa
+from influxdb_client import InfluxDBClient            # v2 client (health)
+from influxdb_client_3 import InfluxDBClient3         # v3 client (SQL)
 
 st.set_page_config(page_title="Sheep Behavior — SQL", layout="wide")
 st.title("🐑 Sheep Behavior — InfluxDB Cloud (SQL)")
 
-# --- 1) Read secrets ---
+# --- 1) Secrets ---
 try:
     cfg = st.secrets["influx"]
     URL   = cfg["url"]     # e.g., "https://eu-central-1-1.aws.cloud2.influxdata.com"
     TOKEN = cfg["token"]   # READ token
     ORG   = cfg["org"]     # org name or ID
-    DB    = cfg["bucket"]  # <- in SQL this is the DATABASE (your bucket)
+    DB    = cfg["bucket"]  # <-- SQL "database" == your bucket
 except Exception as e:
     st.error("Missing or malformed secrets. Set [influx] url/token/org/bucket in Streamlit Secrets.")
     st.exception(e)
@@ -26,7 +27,7 @@ with st.expander("Connection config (sanitized)"):
         "token_prefix": TOKEN[:6] + "..." if isinstance(TOKEN, str) and len(TOKEN) > 6 else "short/invalid",
     })
 
-# --- 2) Connectivity check (optional) using v2 health endpoint ---
+# --- 2) Connectivity check (v2 health) ---
 try:
     with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
         health = client.health()
@@ -36,7 +37,7 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# --- 3) Inputs + SQL (your query) ---
+# --- 3) Inputs + SQL ---
 sheep_id = st.text_input("Sheep ID", value="1")
 days = st.slider("Look-back window (days)", min_value=1, max_value=365, value=30, help="Free plan retains ~30 days")
 
@@ -52,16 +53,30 @@ LIMIT 1000;
 st.subheader("SQL")
 st.code(sql, language="sql")
 
-# --- 4) Run SQL via v3 client ---
+# --- 4) Run SQL (v3 client) and normalize to pandas ---
 try:
     with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
-        df: pd.DataFrame = client.query(sql)
+        result = client.query(sql)  # may return PyArrow Table or pandas DataFrame depending on client version
+
+    # Normalize to pandas.DataFrame
+    if isinstance(result, pd.DataFrame):
+        df = result
+    elif isinstance(result, pa.Table):
+        df = result.to_pandas()
+    elif isinstance(result, list) and result and isinstance(result[0], pa.Table):
+        df = pd.concat([t.to_pandas() for t in result], ignore_index=True)
+    else:
+        # Fallback: try to build a DataFrame
+        df = pd.DataFrame(result)
 
     if df is None or df.empty:
         st.info("No rows returned. Try another Sheep ID, increase the window, or confirm recent data exists (Free plan ≈ 30 days).")
     else:
         st.dataframe(df)
         if {"time", "confidence"}.issubset(df.columns):
+            # Ensure time is datetime index for the chart
+            if not pd.api.types.is_datetime64_any_dtype(df["time"]):
+                df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
             st.line_chart(df.set_index("time")["confidence"])
 except Exception as e:
     st.error("SQL query failed. Check URL/Org/Token/Database (bucket) and retention.")
