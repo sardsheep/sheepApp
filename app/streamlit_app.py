@@ -45,7 +45,7 @@ cfg = st.secrets["influx"]
 URL, TOKEN, ORG, DB = cfg["url"], cfg["token"], cfg["org"], cfg["bucket"]
 
 sheep_id = st.text_input("Sheep ID", value="1")
-days = st.slider("Look-back window (days)", 1, 365, 30, help="Free plan retains ~30 days")
+days = st.slider("Look-back window (days)", 365, help="Free plan retains ~30 days")
 
 sql = f"""
 SELECT time, confidence, label, sheep_id
