@@ -1,5 +1,6 @@
 
 streamlit
 influxdb-client
+influxdb3-python
 pandas
 pytz
