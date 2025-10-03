@@ -39,7 +39,7 @@ except Exception as e:
 
 # --- 3) Inputs + SQL ---
 sheep_id = st.text_input("Sheep ID", value="1")
-days = st.slider("Look-back window (days)", min_value=1, max_value=365, value=30, help="Free plan retains ~30 days")
+days = st.slider("Look-back window (days)", min_value=1, max_value=365, value=364, help="Free plan retains ~30 days")
 
 sql = f"""
 SELECT time, confidence, label, sheep_id
