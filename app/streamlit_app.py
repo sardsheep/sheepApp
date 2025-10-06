@@ -32,14 +32,14 @@ except Exception as e:
     st.stop()
 
 # Only show when debugging
-
-with st.expander("Connection config (sanitized)"):
-    st.write({
-        "url": URL,
-        "org": ORG,
-        "database/bucket": DB,
-        "token_prefix": TOKEN[:6] + "..." if isinstance(TOKEN, str) and len(TOKEN) > 6 else "short/invalid",
-    })
+if SHOW_DEBUG:
+    with st.expander("Connection config (sanitized)"):
+        st.write({
+            "url": URL,
+            "org": ORG,
+            "database/bucket": DB,
+            "token_prefix": TOKEN[:6] + "..." if isinstance(TOKEN, str) and len(TOKEN) > 6 else "short/invalid",
+        })
 
 # --- 2) Connectivity check (v2 health) ---
 try:
