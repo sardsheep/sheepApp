@@ -131,8 +131,8 @@ WHERE time >= TIMESTAMP '{start_iso}'
 LIMIT 1000;
 """
 
-st.subheader("SQL (main)")
-st.code(sql, language="sql")
+#st.subheader("SQL (main)")
+#st.code(sql, language="sql")
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
