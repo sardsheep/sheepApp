@@ -110,10 +110,8 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
-
-
 # --- 6) SQL (chronological: ASC) ---
-# Base SQL (no behaviour filter) - used when ignoring the filter for the pie
+# Base SQL (no behaviour filter) - used later if we want pie to ignore filter
 base_sql = f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
@@ -135,19 +133,6 @@ LIMIT 1000;
 
 st.subheader("SQL (main)")
 st.code(sql, language="sql")
-
-
-
-# --- Pie chart controls (single block; fixed size, no manual picker) ---
-pie_mode = st.radio(
-    "Pie chart basis",
-    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
-    index=0,
-    help="Choose whether the pie respects the current behaviour multiselect.",
-    key="pie_mode_radio",
-)
-show_pie = st.button("Show behaviour pie chart", key="show_pie_btn")
-
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
@@ -173,20 +158,30 @@ try:
         if "time" in df.columns:
             df = df.sort_values("time", ascending=True)
 
+        # --- TABLE + LINE CHART ---
         st.dataframe(df)
-
-        # Line chart of confidence over time (if available)
         if {"time", "confidence"}.issubset(df.columns):
             st.line_chart(df.set_index("time")["confidence"])
 
-        # --- PIE CHART (on demand) ---
+        # --------------- PIE CONTROLS & CHART (AFTER TABLE) ---------------
+        st.divider()
+        st.subheader("Behaviour distribution (pie)")
+
+        pie_mode = st.radio(
+            "Pie chart basis",
+            options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
+            index=0,
+            help="Choose whether the pie respects the current behaviour multiselect.",
+            key="pie_mode_radio",
+        )
+        show_pie = st.button("Show behaviour pie chart", key="show_pie_btn")
+
         if show_pie:
             # Decide data source for the pie
             if pie_mode.startswith("Use"):
                 pie_df = df  # use the current filtered dataframe
                 st.caption("Pie chart uses the current behaviour filter.")
             else:
-                # Re-query ignoring the behaviour filter
                 st.caption("Pie chart ignores the behaviour filter (all behaviours).")
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
                     pie_result = client.query(base_sql)
@@ -216,7 +211,7 @@ try:
                 if total > 0:
                     import matplotlib.pyplot as plt
 
-                    # Fixed, compact size (no manual controls)
+                    # Fixed compact size
                     fig, ax = plt.subplots(figsize=(3.5, 3.5), dpi=120)
                     ax.pie(
                         counts.values,
