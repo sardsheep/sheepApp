@@ -158,12 +158,38 @@ try:
         if "time" in df.columns:
             df = df.sort_values("time", ascending=True)
 
-        # --- TABLE + LINE CHART ---
+        # --- TABLE ---
         st.dataframe(df)
-        if {"time", "confidence"}.issubset(df.columns):
-            st.line_chart(df.set_index("time")["confidence"])
 
-        # --------------- PIE CONTROLS & CHART (AFTER TABLE) ---------------
+        # --- BEHAVIOUR OVER TIME (multi-sheep colored lines) ---
+        st.subheader("Behaviour occurrences over time")
+        if {"time", "label", "sheep_id"}.issubset(df.columns):
+            behaviour_for_line = st.selectbox(
+                "Choose behaviour to plot",
+                options=ALL_BEHAVIOURS,
+                index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
+                key="behaviour_line_select"
+            )
+
+            plot = df.copy()
+            plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
+            target = behaviour_for_line.lower()
+            # 1 when the chosen behaviour occurs, else 0
+            plot["value"] = (plot["label_norm"] == target).astype(int)
+            # one value per time & sheep_id (in case of duplicates)
+            plot["sheep_id"] = plot["sheep_id"].astype(str)
+            plot = plot.groupby(["time", "sheep_id"], as_index=False)["value"].max()
+            # pivot to wide for Streamlit's multi-line chart (one column per sheep)
+            pivot = plot.pivot(index="time", columns="sheep_id", values="value").fillna(0).sort_index()
+
+            if not pivot.empty:
+                st.line_chart(pivot)  # auto different colors per sheep (columns)
+            else:
+                st.info("No data for the selected behaviour to plot.")
+        else:
+            st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour line chart.")
+
+        # --------------- PIE CONTROLS & CHART (AFTER TABLE & LINE) ---------------
         st.divider()
         st.subheader("Behaviour distribution (pie)")
 
@@ -211,7 +237,7 @@ try:
                 if total > 0:
                     import matplotlib.pyplot as plt
 
-                    # No overlap: show % only for larger slices; names go in the legend.
+                    # No overlap: show % only for larger slices; names in legend
                     MIN_PCT_LABEL = 3.0
                     def _fmt_autopct(pct):
                         return f"{pct:.1f}%" if pct >= MIN_PCT_LABEL else ""
@@ -222,13 +248,12 @@ try:
                         startangle=90,
                         autopct=_fmt_autopct,
                         pctdistance=0.72,
-                        labels=None,                 # names in legend, not on slices
+                        labels=None,
                         textprops={"fontsize": 9},
                     )
                     ax.axis("equal")
                     ax.set_title("Behaviour share (%) in selected window", fontsize=10)
 
-                    # Legend: behaviour — count (percent)
                     legend_labels = [
                         f"{name} — {int(cnt)} ({(cnt/total*100):.1f}%)"
                         for name, cnt in zip(known, counts.values)
@@ -241,8 +266,6 @@ try:
 
                     fig.tight_layout(pad=0.4)
                     st.pyplot(fig, use_container_width=False)
-
-
                 else:
                     st.info("No behaviour labels found in the selected window to plot.")
             else:
