@@ -161,7 +161,7 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
-        # --- BEHAVIOUR OVER TIME (events-only, per-second points; no zeros) ---
+        # --- BEHAVIOUR OVER TIME (events-only, per-second points; full time range) ---
         st.subheader("Behaviour occurrences over time (seconds)")
         
         if {"time", "label", "sheep_id"}.issubset(df.columns):
@@ -172,7 +172,6 @@ try:
                 key="behaviour_line_select",
             )
         
-            # Use/ignore the behaviour multiselect for the line (events) plot
             line_basis = st.radio(
                 "Line chart basis",
                 options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
@@ -181,11 +180,10 @@ try:
                 help="If the chosen behaviour isn't in the multiselect above, switch to 'Ignore'."
             )
         
-            # Choose dataset for plotting
+            # Pick dataset (respect or ignore the behaviour filter)
             if line_basis.startswith("Use"):
                 line_df = df.copy()
             else:
-                # Re-query ignoring the behaviour filter
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
                     line_result = client.query(base_sql)
                 if isinstance(line_result, pd.DataFrame):
@@ -202,37 +200,40 @@ try:
             if line_df.empty:
                 st.info("No data available to plot.")
             else:
-                # Build event-only points at second resolution
+                # Keep only seconds where the chosen behaviour occurred; y is always 1
                 plot = line_df.copy()
-                plot["time"] = pd.to_datetime(plot["time"], utc=True)
+                plot["time"]     = pd.to_datetime(plot["time"], utc=True)
+                plot["time_sec"] = plot["time"].dt.floor("S")
                 plot["sheep_id"] = plot["sheep_id"].astype(str)
                 plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
                 target = behaviour_for_line.lower()
-                plot["value"] = (plot["label_norm"] == target).astype(int)
         
-                # Keep one row per (second, sheep) if behaviour occurred in that second
-                plot["time_sec"] = plot["time"].dt.floor("S")
                 events = (
-                    plot.groupby(["time_sec", "sheep_id"], as_index=False)["value"]
-                        .max()                         # any occurrence in that second
-                        .query("value == 1")           # keep only the 1s (events)
+                    plot.assign(value=(plot["label_norm"] == target).astype(int))
+                        .groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
+                        .query("value == 1")
                 )
         
+                # --- Draw points and force x-axis to full selected window ---
                 if events.empty:
                     st.info("No occurrences of the selected behaviour in the chosen window/IDs.")
                 else:
                     try:
                         import altair as alt
-                        # Scatter: y is always 1; color by sheep_id
+                        domain_min = pd.to_datetime(start_iso, utc=True)
+                        domain_max = pd.to_datetime(end_iso,   utc=True)
+        
                         chart = (
                             alt.Chart(events)
                             .mark_circle(size=36, opacity=0.9)
                             .encode(
-                                x=alt.X("time_sec:T", title="Time"),
+                                x=alt.X("time_sec:T",
+                                        title="Time",
+                                        scale=alt.Scale(domain=[domain_min, domain_max])),
                                 y=alt.Y("value:Q",
                                         title="Occurrence",
                                         scale=alt.Scale(domain=[0, 1.1]),
-                                        axis=alt.Axis(values=[1])),
+                                        axis=alt.Axis(values=[1], labels=False, ticks=False)),
                                 color=alt.Color("sheep_id:N", title="Sheep ID"),
                                 tooltip=["time_sec:T", "sheep_id:N"]
                             )
@@ -240,10 +241,13 @@ try:
                         )
                         st.altair_chart(chart, use_container_width=True)
                     except Exception:
-                        # Fallback: make a sparse dataframe with NaNs so Streamlit won't draw 0s
-                        # One column per sheep; NaN for no event -> no line segments between points
-                        pivot = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
-                        st.line_chart(pivot)  # draws short segments only where points exist
+                        # Fallback: wide DF with NaNs (full index) so Streamlit shows full range without zeros
+                        full_idx = pd.date_range(start=pd.to_datetime(start_iso, utc=True),
+                                                 end=pd.to_datetime(end_iso,   utc=True),
+                                                 freq="1S", tz="UTC")
+                        wide = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
+                        wide = wide.reindex(full_idx)  # leaves NaN where no event -> no line
+                        st.line_chart(wide)
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour chart.")
 
