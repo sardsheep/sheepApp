@@ -110,15 +110,7 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
-# --- Pie chart controls (single block; fixed size, no manual picker) ---
-pie_mode = st.radio(
-    "Pie chart basis",
-    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
-    index=0,
-    help="Choose whether the pie respects the current behaviour multiselect.",
-    key="pie_mode_radio",
-)
-show_pie = st.button("Show behaviour pie chart", key="show_pie_btn")
+
 
 # --- 6) SQL (chronological: ASC) ---
 # Base SQL (no behaviour filter) - used when ignoring the filter for the pie
@@ -143,6 +135,19 @@ LIMIT 1000;
 
 st.subheader("SQL (main)")
 st.code(sql, language="sql")
+
+
+
+# --- Pie chart controls (single block; fixed size, no manual picker) ---
+pie_mode = st.radio(
+    "Pie chart basis",
+    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
+    index=0,
+    help="Choose whether the pie respects the current behaviour multiselect.",
+    key="pie_mode_radio",
+)
+show_pie = st.button("Show behaviour pie chart", key="show_pie_btn")
+
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
