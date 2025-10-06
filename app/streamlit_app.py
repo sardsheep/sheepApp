@@ -110,34 +110,55 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower().strip() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(TRIM(label)) IN ({beh_in_list})\n"
 
+# --- 5b) Sheep type radio (Ram/Ewe) + SQL clause (safe fallback if column missing) ---
+sheep_type_choice = st.radio(
+    "Sheep type",
+    options=["Any", "Ram", "Ewe"],
+    index=0,
+    horizontal=True,
+    key="sheep_type_radio",
+)
+type_clause = ""
+if sheep_type_choice != "Any":
+    # NOTE: change 'sheep_type' to your actual column name if different.
+    type_clause = f"  AND LOWER(TRIM(sheep_type)) = '{sheep_type_choice.lower().strip()}'\n"
+
 # --- 6) SQL (chronological: ASC) ---
-ROW_LIMIT = 500_000  # fixed default, no UI
+ROW_LIMIT = 500_000  # fixed default
 st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
-# Base SQL (no behaviour filter) - used later if we want pie/line to ignore filter
-base_sql = f"""
+def build_sql(include_type: bool, include_behaviour: bool, limit: int = ROW_LIMIT) -> str:
+    return f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
 WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
-{sheep_clause}ORDER BY time ASC
-LIMIT {ROW_LIMIT};
+{sheep_clause}{(type_clause if include_type else "")}{(behaviour_clause if include_behaviour else "")}ORDER BY time ASC
+LIMIT {limit};
 """
 
-# Main SQL (respects behaviour filter for table/line chart)
-sql = f"""
-SELECT time, confidence, label, sheep_id
-FROM sheep_behavior_pred
-WHERE time >= TIMESTAMP '{start_iso}'
-  AND time <= TIMESTAMP '{end_iso}'
-{sheep_clause}{behaviour_clause}ORDER BY time ASC
-LIMIT {ROW_LIMIT};
-"""
+# Build both strings with current choices
+base_sql_current = build_sql(include_type=(type_clause != ""), include_behaviour=False)
+sql_current      = build_sql(include_type=(type_clause != ""), include_behaviour=True)
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
     with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
-        result = client.query(sql)
+        # Try with sheep_type filter (if requested). If the column doesn't exist, retry without it.
+        try:
+            result = client.query(sql_current)
+            type_filter_applied = (type_clause != "")
+        except Exception as e1:
+            msg = str(e1).lower()
+            if (type_clause != "") and ("sheep_type" in msg or "column" in msg and ("not" in msg and ("exist" in msg or "found" in msg))):
+                st.warning("Column `sheep_type` not found — ignoring Ram/Ewe filter.")
+                # Rebuild SQLs without the type clause and retry
+                base_sql_current = build_sql(include_type=False, include_behaviour=False)
+                sql_current      = build_sql(include_type=False, include_behaviour=True)
+                result = client.query(sql_current)
+                type_filter_applied = False
+            else:
+                raise  # not a missing-column error; bubble up
 
     # Normalize to pandas.DataFrame
     if isinstance(result, pd.DataFrame):
@@ -183,7 +204,7 @@ try:
                     f"is not in the behaviour filter above."
                 )
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
-                    line_result = client.query(base_sql)
+                    line_result = client.query(base_sql_current)
                 if isinstance(line_result, pd.DataFrame):
                     line_df = line_result
                 elif isinstance(line_result, pa.Table):
@@ -281,7 +302,7 @@ try:
             else:
                 st.caption("Pie chart ignores the behaviour filter (all behaviours).")
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
-                    pie_result = client.query(base_sql)
+                    pie_result = client.query(base_sql_current)
                 if isinstance(pie_result, pd.DataFrame):
                     pie_df = pie_result
                 elif isinstance(pie_result, pa.Table):
