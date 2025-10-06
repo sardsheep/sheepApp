@@ -50,11 +50,11 @@ default_start_date = today_local - timedelta(days=30)
 
 c1, c2 = st.columns(2)
 with c1:
-    start_date = st.date_input("Start date (local)", value=default_start_date)
-    start_time = st.time_input("Start time (local)", value=dtime(0, 0))
+    start_date = st.date_input("Start date (local)", value=default_start_date, key="start_date")
+    start_time = st.time_input("Start time (local)", value=dtime(0, 0), key="start_time")
 with c2:
-    end_date = st.date_input("End date (local)", value=today_local)
-    end_time = st.time_input("End time (local)", value=dtime(23, 59))
+    end_date = st.date_input("End date (local)", value=today_local, key="end_date")
+    end_time = st.time_input("End time (local)", value=dtime(23, 59), key="end_time")
 
 start_dt_local = datetime.combine(start_date, start_time, tzinfo=TZ_LOCAL)
 end_dt_local   = datetime.combine(end_date,   end_time,   tzinfo=TZ_LOCAL)
@@ -78,7 +78,8 @@ selected_ids = st.multiselect(
     "Sheep IDs (optional)",
     options=ALL_SHEEP_IDS,
     default=[],
-    help="Pick one or more IDs (1–10). Leave empty to include all 10."
+    help="Pick one or more IDs (1–10). Leave empty to include all 10.",
+    key="sheep_ids"
 )
 
 def _q(s: str) -> str:
@@ -100,7 +101,8 @@ selected_behaviours = st.multiselect(
     "Predicted Behaviour (optional filter)",
     options=ALL_BEHAVIOURS,
     default=[],
-    help="Pick one or more behaviours. Leave empty to include all."
+    help="Pick one or more behaviours. Leave empty to include all.",
+    key="behaviours"
 )
 
 behaviour_clause = ""
@@ -108,34 +110,18 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
-
-
-
-# --- Controls for PIE CHART ---
+# --- Pie chart controls (single block; fixed size, no manual picker) ---
 pie_mode = st.radio(
     "Pie chart basis",
     options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
     index=0,
+    help="Choose whether the pie respects the current behaviour multiselect.",
+    key="pie_mode_radio",
 )
-show_pie = st.button("Show behaviour pie chart")
-
-# NEW: size + font controls
-pie_size = st.slider("Pie size (inches)", 2.0, 8.0, 3.5, 0.1)
-pie_font = st.slider("Pie label font size", 6, 16, 9)
-
-
-
-# --- Controls for PIE CHART ---
-pie_mode = st.radio(
-    "Pie chart basis",
-    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
-    index=0,
-    help="Choose whether the pie respects the current behaviour multiselect."
-)
-show_pie = st.button("Show behaviour pie chart")
+show_pie = st.button("Show behaviour pie chart", key="show_pie_btn")
 
 # --- 6) SQL (chronological: ASC) ---
-# Base SQL (no behaviour filter) - we will use this when ignoring the filter for the pie
+# Base SQL (no behaviour filter) - used when ignoring the filter for the pie
 base_sql = f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
@@ -225,18 +211,20 @@ try:
                 if total > 0:
                     import matplotlib.pyplot as plt
 
-                    fig, ax = plt.subplots(figsize=(pie_size, pie_size), dpi=120)  # smaller figure
+                    # Fixed, compact size (no manual controls)
+                    fig, ax = plt.subplots(figsize=(3.5, 3.5), dpi=120)
                     ax.pie(
                         counts.values,
                         labels=known,
                         autopct=lambda p: f"{p:.1f}%",
                         startangle=90,
-                        textprops={"fontsize": pie_font},      # smaller text
-                        pctdistance=0.8,                       # keep % closer to center
+                        textprops={"fontsize": 9},
+                        pctdistance=0.8,
                     )
                     ax.axis("equal")
-                    ax.set_title("Behaviour share (%) in selected window", fontsize=pie_font + 1)
-                    st.pyplot(fig, use_container_width=False)  # don't stretch to full width
+                    ax.set_title("Behaviour share (%) in selected window", fontsize=10)
+                    fig.tight_layout(pad=0.5)
+                    st.pyplot(fig, use_container_width=False)
 
                     summary = pd.DataFrame({
                         "count": counts.astype(int),
