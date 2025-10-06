@@ -37,6 +37,21 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+
+
+# NEW: sheep type filter (1=Ram, 2=EWE; includes 'Any' to disable the filter)
+sheep_type = st.selectbox(
+    "Sheep type",
+    options=["Any", "Ram", "EWE"],
+    index=0,
+    help="1 = Ram, 2 = EWE"
+)
+
+# Build optional type clause (change 'sheep_type' to your actual column if different)
+type_clause = "" if sheep_type == "Any" else f"  AND LOWER(sheep_type) = LOWER('{sheep_type}')\n"
+
+
+
 # --- 3) Inputs + SQL ---
 sheep_id = st.text_input("Sheep ID", value="1")
 days = st.slider("Look-back window (days)", min_value=1, max_value=365, value=364, help="Free plan retains ~30 days")
