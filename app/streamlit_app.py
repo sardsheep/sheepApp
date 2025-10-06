@@ -211,24 +211,41 @@ try:
                 if total > 0:
                     import matplotlib.pyplot as plt
 
-                    # Fixed compact size
-                    fig, ax = plt.subplots(figsize=(3.5, 3.5), dpi=120)
-                    ax.pie(
+                    # No overlap: show % only for larger slices; names go in the legend.
+                    MIN_PCT_LABEL = 3.0
+                    def _fmt_autopct(pct):
+                        return f"{pct:.1f}%" if pct >= MIN_PCT_LABEL else ""
+
+                    fig, ax = plt.subplots(figsize=(4.5, 3.2), dpi=120)
+                    wedges, texts, autotexts = ax.pie(
                         counts.values,
-                        labels=known,
-                        autopct=lambda p: f"{p:.1f}%",
                         startangle=90,
+                        autopct=_fmt_autopct,
+                        pctdistance=0.72,
+                        labels=None,                 # names in legend, not on slices
                         textprops={"fontsize": 9},
-                        pctdistance=0.8,
                     )
                     ax.axis("equal")
                     ax.set_title("Behaviour share (%) in selected window", fontsize=10)
-                    fig.tight_layout(pad=0.5)
+
+                    # Legend: behaviour — count (percent)
+                    legend_labels = [
+                        f"{name} — {int(cnt)} ({(cnt/total*100):.1f}%)"
+                        for name, cnt in zip(known, counts.values)
+                    ]
+                    ax.legend(
+                        wedges, legend_labels, title="Behaviour",
+                        loc="center left", bbox_to_anchor=(1.0, 0.5),
+                        fontsize=9, title_fontsize=10, frameon=False
+                    )
+
+                    fig.tight_layout(pad=0.4)
                     st.pyplot(fig, use_container_width=False)
 
                     summary = pd.DataFrame({
-                        "count": counts.astype(int),
-                        "percent": (counts / total * 100).round(2),
+                        "behaviour": known,
+                        "count": counts.astype(int).values,
+                        "percent": (counts / total * 100).round(2).values,
                     })
                     st.dataframe(summary)
                 else:
