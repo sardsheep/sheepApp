@@ -5,7 +5,7 @@ from influxdb_client import InfluxDBClient            # v2 client (health)
 from influxdb_client_3 import InfluxDBClient3         # v3 client (SQL)
 
 st.set_page_config(page_title="Sheep Behavior — SQL", layout="wide")
-st.title("🐑 Sheep Behavior — InfluxDB Cloud (SQL)")
+st.title("🐑 Sheep Behavior ")
 
 # --- 1) Secrets ---
 try:
