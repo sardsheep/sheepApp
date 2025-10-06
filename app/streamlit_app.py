@@ -127,6 +127,7 @@ try:
     with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
         result = client.query(sql)
 
+    # Normalize to pandas.DataFrame
     if isinstance(result, pd.DataFrame):
         df = result
     elif isinstance(result, pa.Table):
@@ -139,14 +140,55 @@ try:
     if df is None or df.empty:
         st.info("No rows returned. Try different IDs/behaviours or widen the date/time window.")
     else:
-        # Ensure proper chronological order in UI as well
+        # Ensure time is datetime and sort old -> new
+        if "time" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["time"]):
+            df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
         if "time" in df.columns:
             df = df.sort_values("time", ascending=True)
+
         st.dataframe(df)
+
+        # Line chart of confidence over time (if available)
         if {"time", "confidence"}.issubset(df.columns):
-            if not pd.api.types.is_datetime64_any_dtype(df["time"]):
-                df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
             st.line_chart(df.set_index("time")["confidence"])
+
+        # --- Pie chart: behaviour share in the selected window ---
+        if "label" in df.columns:
+            labels_norm = df["label"].astype(str).str.strip().str.lower()
+
+            # Keep a consistent 8-behaviour order (fill zeros for missing)
+            known = [
+                "flehmen", "grazing", "head-butting", "lying",
+                "mating", "running", "standing", "walking",
+            ]
+            counts = labels_norm.value_counts().reindex(known, fill_value=0)
+            total = int(counts.sum())
+
+            if total > 0:
+                import matplotlib.pyplot as plt
+
+                fig, ax = plt.subplots()
+                ax.pie(
+                    counts.values,
+                    labels=known,
+                    autopct=lambda p: f"{p:.1f}%",
+                    startangle=90,
+                )
+                ax.axis("equal")  # make it a circle
+                ax.set_title("Behaviour share (%) in selected window")
+                st.pyplot(fig)
+
+                # Optional: table with counts & percentages
+                summary = pd.DataFrame({
+                    "count": counts.astype(int),
+                    "percent": (counts / total * 100).round(2),
+                })
+                st.dataframe(summary)
+            else:
+                st.info("No behaviour labels found in the selected window to plot.")
+        else:
+            st.info("Column 'label' not found; cannot draw behaviour share pie chart.")
+
 except Exception as e:
-    st.error("SQL query failed. Check URL/Org/Token/Database (bucket) and retention.")
+    st.error("SQL query or rendering failed. Check URL/Org/Token/Database (bucket), permissions, and query syntax.")
     st.exception(e)
