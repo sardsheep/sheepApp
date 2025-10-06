@@ -108,6 +108,23 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
+
+
+
+# --- Controls for PIE CHART ---
+pie_mode = st.radio(
+    "Pie chart basis",
+    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
+    index=0,
+)
+show_pie = st.button("Show behaviour pie chart")
+
+# NEW: size + font controls
+pie_size = st.slider("Pie size (inches)", 2.0, 8.0, 3.5, 0.1)
+pie_font = st.slider("Pie label font size", 6, 16, 9)
+
+
+
 # --- Controls for PIE CHART ---
 pie_mode = st.radio(
     "Pie chart basis",
@@ -208,16 +225,18 @@ try:
                 if total > 0:
                     import matplotlib.pyplot as plt
 
-                    fig, ax = plt.subplots()
+                    fig, ax = plt.subplots(figsize=(pie_size, pie_size), dpi=120)  # smaller figure
                     ax.pie(
                         counts.values,
                         labels=known,
                         autopct=lambda p: f"{p:.1f}%",
                         startangle=90,
+                        textprops={"fontsize": pie_font},      # smaller text
+                        pctdistance=0.8,                       # keep % closer to center
                     )
-                    ax.axis("equal")
-                    ax.set_title("Behaviour share (%) in selected window")
-                    st.pyplot(fig)
+ax.axis("equal")
+ax.set_title("Behaviour share (%) in selected window", fontsize=pie_font + 1)
+st.pyplot(fig, use_container_width=False)  # don't stretch to full width
 
                     summary = pd.DataFrame({
                         "count": counts.astype(int),
