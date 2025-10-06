@@ -111,6 +111,10 @@ if selected_behaviours:
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
 # --- 6) SQL (chronological: ASC) ---
+
+ROW_LIMIT = st.slider("Max rows to fetch", 1000, 200000, 50000, 1000,
+                      help="Increase if you don’t see expected events.")
+
 # Base SQL (no behaviour filter) - used later if we want pie to ignore filter
 base_sql = f"""
 SELECT time, confidence, label, sheep_id
@@ -118,7 +122,7 @@ FROM sheep_behavior_pred
 WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
 {sheep_clause}ORDER BY time ASC
-LIMIT 1000;
+LIMIT {ROW_LIMIT};
 """
 
 # Main SQL (respects behaviour filter for table/line chart)
@@ -128,7 +132,7 @@ FROM sheep_behavior_pred
 WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
 {sheep_clause}{behaviour_clause}ORDER BY time ASC
-LIMIT 1000;
+LIMIT {ROW_LIMIT};
 """
 
 #st.subheader("SQL (main)")
@@ -161,7 +165,7 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
-        # --- BEHAVIOUR OVER TIME (events-only, per-second points; full time range) ---
+        # --- BEHAVIOUR OVER TIME (events-only, per-second points; full window) ---
         st.subheader("Behaviour occurrences over time (seconds)")
         
         if {"time", "label", "sheep_id"}.issubset(df.columns):
@@ -177,10 +181,18 @@ try:
                 options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
                 index=0,
                 key="line_basis_radio",
-                help="If the chosen behaviour isn't in the multiselect above, switch to 'Ignore'."
+                help="If your chosen behaviour isn’t in the multiselect above, switch to 'Ignore'."
             )
         
-            # Pick dataset (respect or ignore the behaviour filter)
+            # Warn if behaviour is not in the multiselect while using the filter
+            if line_basis.startswith("Use") and selected_behaviours \
+               and behaviour_for_line.lower() not in [b.lower() for b in selected_behaviours]:
+                st.warning(
+                    f"'{behaviour_for_line}' is not in the behaviour filter above. "
+                    f"Either add it there or switch basis to 'Ignore'."
+                )
+        
+            # Decide dataset for plotting (respect or ignore behaviour filter)
             if line_basis.startswith("Use"):
                 line_df = df.copy()
             else:
@@ -198,25 +210,26 @@ try:
                     line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
         
             if line_df.empty:
-                st.info("No data available to plot.")
+                st.info("No data available to plot (consider increasing 'Max rows to fetch').")
             else:
-                # Keep only seconds where the chosen behaviour occurred; y is always 1
                 plot = line_df.copy()
-                plot["time"]     = pd.to_datetime(plot["time"], utc=True)
-                plot["time_sec"] = plot["time"].dt.floor("S")
-                plot["sheep_id"] = plot["sheep_id"].astype(str)
-                plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
+                plot["time"]      = pd.to_datetime(plot["time"], utc=True)
+                plot["time_sec"]  = plot["time"].dt.floor("S")
+                plot["sheep_id"]  = plot["sheep_id"].astype(str)
+                plot["label_norm"]= plot["label"].astype(str).str.strip().str.lower()
                 target = behaviour_for_line.lower()
         
+                # Keep only seconds where the chosen behaviour occurred
                 events = (
                     plot.assign(value=(plot["label_norm"] == target).astype(int))
                         .groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
                         .query("value == 1")
                 )
         
-                # --- Draw points and force x-axis to full selected window ---
+                # Draw points and force full x-range to the selected window
                 if events.empty:
-                    st.info("No occurrences of the selected behaviour in the chosen window/IDs.")
+                    st.info("No occurrences of the selected behaviour in this window/IDs "
+                            "(or increase 'Max rows to fetch').")
                 else:
                     try:
                         import altair as alt
@@ -241,15 +254,17 @@ try:
                         )
                         st.altair_chart(chart, use_container_width=True)
                     except Exception:
-                        # Fallback: wide DF with NaNs (full index) so Streamlit shows full range without zeros
+                        # Fallback: sparse wide frame with NaNs so only event points draw
+                        wide = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
+                        # Reindex to full window but keep NaNs (no zeros => no line between points)
                         full_idx = pd.date_range(start=pd.to_datetime(start_iso, utc=True),
                                                  end=pd.to_datetime(end_iso,   utc=True),
                                                  freq="1S", tz="UTC")
-                        wide = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
-                        wide = wide.reindex(full_idx)  # leaves NaN where no event -> no line
+                        wide = wide.reindex(full_idx)
                         st.line_chart(wide)
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour chart.")
+
 
 
         # --------------- PIE CONTROLS & CHART (AFTER TABLE & LINE) ---------------
