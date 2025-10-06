@@ -44,9 +44,7 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-# --- 3) Inputs: Sheep ID + explicit start/end date & time (local) ---
-sheep_id = st.text_input("Sheep ID", value="1")
-
+# --- 3) Inputs: explicit start/end date & time (local) ---
 today_local = datetime.now(TZ_LOCAL).date()
 default_start_date = today_local - timedelta(days=30)
 
@@ -74,7 +72,27 @@ st.caption(
     f"(UTC: {start_iso} → {end_iso})"
 )
 
-# --- 4) Behaviour multiselect (8 behaviours). If none selected -> show all ---
+# --- 4) Sheep ID multiselect (1..10). If none selected -> include all 10 ---
+ALL_SHEEP_IDS = [str(i) for i in range(1, 11)]
+selected_ids = st.multiselect(
+    "Sheep IDs (optional)",
+    options=ALL_SHEEP_IDS,
+    default=[],
+    help="Pick one or more IDs (1–10). Leave empty to include all 10."
+)
+
+def _q(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+if selected_ids:
+    id_in_list = ",".join(_q(sid) for sid in selected_ids)
+else:
+    # default to all 10 if nothing selected
+    id_in_list = ",".join(_q(sid) for sid in ALL_SHEEP_IDS)
+
+sheep_clause = f"  AND sheep_id IN ({id_in_list})\n"
+
+# --- 5) Behaviour multiselect (8 behaviours). If none selected -> show all ---
 ALL_BEHAVIOURS = [
     "flehmen", "grazing", "head-butting", "lying",
     "mating", "running", "standing", "walking",
@@ -86,33 +104,25 @@ selected_behaviours = st.multiselect(
     help="Pick one or more behaviours. Leave empty to include all."
 )
 
-# Build behaviour clause (case-insensitive) only if something is selected
-def _q(s: str) -> str:
-    return "'" + s.replace("'", "''").lower() + "'"
-
 behaviour_clause = ""
 if selected_behaviours:
-    in_list = ",".join(_q(b) for b in selected_behaviours)
-    behaviour_clause = f"  AND LOWER(label) IN ({in_list})\n"
+    beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
+    behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
-# Sanitize sheep_id for SQL
-safe_sheep_id = str(sheep_id).replace("'", "''")
-
-# --- 5) SQL ---
+# --- 6) SQL (chronological: ASC) ---
 sql = f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
-WHERE sheep_id = '{safe_sheep_id}'
-  AND time >= TIMESTAMP '{start_iso}'
+WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
-{behaviour_clause}ORDER BY time ASC
+{sheep_clause}{behaviour_clause}ORDER BY time ASC
 LIMIT 1000;
 """
 
 st.subheader("SQL")
 st.code(sql, language="sql")
 
-# --- 6) Run SQL (v3 client) and normalize to pandas ---
+# --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
     with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
         result = client.query(sql)
@@ -127,8 +137,11 @@ try:
         df = pd.DataFrame(result)
 
     if df is None or df.empty:
-        st.info("No rows returned. Try another Sheep ID, widen the date/time window, or pick different behaviours.")
+        st.info("No rows returned. Try different IDs/behaviours or widen the date/time window.")
     else:
+        # Ensure proper chronological order in UI as well
+        if "time" in df.columns:
+            df = df.sort_values("time", ascending=True)
         st.dataframe(df)
         if {"time", "confidence"}.issubset(df.columns):
             if not pd.api.types.is_datetime64_any_dtype(df["time"]):
