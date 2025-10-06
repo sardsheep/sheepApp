@@ -87,7 +87,6 @@ def _q(s: str) -> str:
 if selected_ids:
     id_in_list = ",".join(_q(sid) for sid in selected_ids)
 else:
-    # default to all 10 if nothing selected
     id_in_list = ",".join(_q(sid) for sid in ALL_SHEEP_IDS)
 
 sheep_clause = f"  AND sheep_id IN ({id_in_list})\n"
@@ -109,7 +108,27 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
 
+# --- Controls for PIE CHART ---
+pie_mode = st.radio(
+    "Pie chart basis",
+    options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
+    index=0,
+    help="Choose whether the pie respects the current behaviour multiselect."
+)
+show_pie = st.button("Show behaviour pie chart")
+
 # --- 6) SQL (chronological: ASC) ---
+# Base SQL (no behaviour filter) - we will use this when ignoring the filter for the pie
+base_sql = f"""
+SELECT time, confidence, label, sheep_id
+FROM sheep_behavior_pred
+WHERE time >= TIMESTAMP '{start_iso}'
+  AND time <= TIMESTAMP '{end_iso}'
+{sheep_clause}ORDER BY time ASC
+LIMIT 1000;
+"""
+
+# Main SQL (respects behaviour filter for table/line chart)
 sql = f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
@@ -119,7 +138,7 @@ WHERE time >= TIMESTAMP '{start_iso}'
 LIMIT 1000;
 """
 
-st.subheader("SQL")
+st.subheader("SQL (main)")
 st.code(sql, language="sql")
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
@@ -152,43 +171,63 @@ try:
         if {"time", "confidence"}.issubset(df.columns):
             st.line_chart(df.set_index("time")["confidence"])
 
-        # --- Pie chart: behaviour share in the selected window ---
-        if "label" in df.columns:
-            labels_norm = df["label"].astype(str).str.strip().str.lower()
-
-            # Keep a consistent 8-behaviour order (fill zeros for missing)
-            known = [
-                "flehmen", "grazing", "head-butting", "lying",
-                "mating", "running", "standing", "walking",
-            ]
-            counts = labels_norm.value_counts().reindex(known, fill_value=0)
-            total = int(counts.sum())
-
-            if total > 0:
-                import matplotlib.pyplot as plt
-
-                fig, ax = plt.subplots()
-                ax.pie(
-                    counts.values,
-                    labels=known,
-                    autopct=lambda p: f"{p:.1f}%",
-                    startangle=90,
-                )
-                ax.axis("equal")  # make it a circle
-                ax.set_title("Behaviour share (%) in selected window")
-                st.pyplot(fig)
-
-                # Optional: table with counts & percentages
-                summary = pd.DataFrame({
-                    "count": counts.astype(int),
-                    "percent": (counts / total * 100).round(2),
-                })
-                st.dataframe(summary)
+        # --- PIE CHART (on demand) ---
+        if show_pie:
+            # Decide data source for the pie
+            if pie_mode.startswith("Use"):
+                pie_df = df  # use the current filtered dataframe
+                st.caption("Pie chart uses the current behaviour filter.")
             else:
-                st.info("No behaviour labels found in the selected window to plot.")
-        else:
-            st.info("Column 'label' not found; cannot draw behaviour share pie chart.")
+                # Re-query ignoring the behaviour filter
+                st.caption("Pie chart ignores the behaviour filter (all behaviours).")
+                with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
+                    pie_result = client.query(base_sql)
+                if isinstance(pie_result, pd.DataFrame):
+                    pie_df = pie_result
+                elif isinstance(pie_result, pa.Table):
+                    pie_df = pie_result.to_pandas()
+                elif isinstance(pie_result, list) and pie_result and isinstance(pie_result[0], pa.Table):
+                    pie_df = pd.concat([t.to_pandas() for t in pie_result], ignore_index=True)
+                else:
+                    pie_df = pd.DataFrame(pie_result)
 
+                if "time" in pie_df.columns and not pd.api.types.is_datetime64_any_dtype(pie_df["time"]):
+                    pie_df["time"] = pd.to_datetime(pie_df["time"], errors="coerce", utc=True)
+
+            # Build PIE if labels available
+            if pie_df is not None and not pie_df.empty and "label" in pie_df.columns:
+                labels_norm = pie_df["label"].astype(str).str.strip().str.lower()
+
+                known = [
+                    "flehmen", "grazing", "head-butting", "lying",
+                    "mating", "running", "standing", "walking",
+                ]
+                counts = labels_norm.value_counts().reindex(known, fill_value=0)
+                total = int(counts.sum())
+
+                if total > 0:
+                    import matplotlib.pyplot as plt
+
+                    fig, ax = plt.subplots()
+                    ax.pie(
+                        counts.values,
+                        labels=known,
+                        autopct=lambda p: f"{p:.1f}%",
+                        startangle=90,
+                    )
+                    ax.axis("equal")
+                    ax.set_title("Behaviour share (%) in selected window")
+                    st.pyplot(fig)
+
+                    summary = pd.DataFrame({
+                        "count": counts.astype(int),
+                        "percent": (counts / total * 100).round(2),
+                    })
+                    st.dataframe(summary)
+                else:
+                    st.info("No behaviour labels found in the selected window to plot.")
+            else:
+                st.info("No data or 'label' column missing for pie chart.")
 except Exception as e:
     st.error("SQL query or rendering failed. Check URL/Org/Token/Database (bucket), permissions, and query syntax.")
     st.exception(e)
