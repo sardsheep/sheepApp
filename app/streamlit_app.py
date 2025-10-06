@@ -107,8 +107,9 @@ selected_behaviours = st.multiselect(
 
 behaviour_clause = ""
 if selected_behaviours:
-    beh_in_list = ",".join("'" + b.replace("'", "''").lower() + "'" for b in selected_behaviours)
-    behaviour_clause = f"  AND LOWER(label) IN ({beh_in_list})\n"
+    beh_in_list = ",".join("'" + b.replace("'", "''").lower().strip() + "'" for b in selected_behaviours)
+    behaviour_clause = f"  AND LOWER(TRIM(label)) IN ({beh_in_list})\n"
+
 
 # --- 6) SQL (chronological: ASC) ---
 
@@ -176,26 +177,18 @@ try:
                 key="behaviour_line_select",
             )
         
-            line_basis = st.radio(
-                "Line chart basis",
-                options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
-                index=0,
-                key="line_basis_radio",
-                help="If your chosen behaviour isn’t in the multiselect above, switch to 'Ignore'."
+            # If the chosen behaviour isn't included in the multiselect filter, auto-fallback
+            need_fallback = (
+                bool(selected_behaviours)
+                and behaviour_for_line.lower() not in [b.lower().strip() for b in selected_behaviours]
             )
         
-            # Warn if behaviour is not in the multiselect while using the filter
-            if line_basis.startswith("Use") and selected_behaviours \
-               and behaviour_for_line.lower() not in [b.lower() for b in selected_behaviours]:
-                st.warning(
-                    f"'{behaviour_for_line}' is not in the behaviour filter above. "
-                    f"Either add it there or switch basis to 'Ignore'."
+            if need_fallback:
+                st.info(
+                    f"Auto-using all behaviours for the chart because '{behaviour_for_line}' "
+                    f"is not in the behaviour filter above."
                 )
-        
-            # Decide dataset for plotting (respect or ignore behaviour filter)
-            if line_basis.startswith("Use"):
-                line_df = df.copy()
-            else:
+                # Re-query ignoring the behaviour filter (use base_sql)
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
                     line_result = client.query(base_sql)
                 if isinstance(line_result, pd.DataFrame):
@@ -206,27 +199,30 @@ try:
                     line_df = pd.concat([t.to_pandas() for t in line_result], ignore_index=True)
                 else:
                     line_df = pd.DataFrame(line_result)
-                if "time" in line_df.columns and not pd.api.types.is_datetime64_any_dtype(line_df["time"]):
-                    line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
+            else:
+                # Use the current (possibly behaviour-filtered) data
+                line_df = df.copy()
+        
+            if "time" in line_df.columns and not pd.api.types.is_datetime64_any_dtype(line_df["time"]):
+                line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
         
             if line_df.empty:
-                st.info("No data available to plot (consider increasing 'Max rows to fetch').")
+                st.info("No data available to plot. Try widening the window or increasing 'Max rows to fetch'.")
             else:
                 plot = line_df.copy()
                 plot["time"]      = pd.to_datetime(plot["time"], utc=True)
                 plot["time_sec"]  = plot["time"].dt.floor("S")
                 plot["sheep_id"]  = plot["sheep_id"].astype(str)
                 plot["label_norm"]= plot["label"].astype(str).str.strip().str.lower()
-                target = behaviour_for_line.lower()
+                target = behaviour_for_line.lower().strip()
         
-                # Keep only seconds where the chosen behaviour occurred
+                # Keep only seconds where the chosen behaviour occurred (y=1 points only)
                 events = (
                     plot.assign(value=(plot["label_norm"] == target).astype(int))
                         .groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
                         .query("value == 1")
                 )
         
-                # Draw points and force full x-range to the selected window
                 if events.empty:
                     st.info("No occurrences of the selected behaviour in this window/IDs "
                             "(or increase 'Max rows to fetch').")
@@ -256,15 +252,13 @@ try:
                     except Exception:
                         # Fallback: sparse wide frame with NaNs so only event points draw
                         wide = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
-                        # Reindex to full window but keep NaNs (no zeros => no line between points)
                         full_idx = pd.date_range(start=pd.to_datetime(start_iso, utc=True),
                                                  end=pd.to_datetime(end_iso,   utc=True),
                                                  freq="1S", tz="UTC")
-                        wide = wide.reindex(full_idx)
+                        wide = wide.reindex(full_idx)  # keep NaNs where no event -> no zeros drawn
                         st.line_chart(wide)
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour chart.")
-
 
 
         # --------------- PIE CONTROLS & CHART (AFTER TABLE & LINE) ---------------
