@@ -110,13 +110,11 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower().strip() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(TRIM(label)) IN ({beh_in_list})\n"
 
-
 # --- 6) SQL (chronological: ASC) ---
+ROW_LIMIT = 500_000  # fixed default, no UI
+st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
-ROW_LIMIT = st.slider("Max rows to fetch", 1000, 200000, 50000, 1000,
-                      help="Increase if you don’t see expected events.")
-
-# Base SQL (no behaviour filter) - used later if we want pie to ignore filter
+# Base SQL (no behaviour filter) - used later if we want pie/line to ignore filter
 base_sql = f"""
 SELECT time, confidence, label, sheep_id
 FROM sheep_behavior_pred
@@ -135,9 +133,6 @@ WHERE time >= TIMESTAMP '{start_iso}'
 {sheep_clause}{behaviour_clause}ORDER BY time ASC
 LIMIT {ROW_LIMIT};
 """
-
-#st.subheader("SQL (main)")
-#st.code(sql, language="sql")
 
 # --- 7) Run SQL (v3 client) and normalize to pandas ---
 try:
@@ -168,7 +163,6 @@ try:
 
         # --- BEHAVIOUR OVER TIME (events-only points; interactive zoom) ---
         st.subheader("Behaviour occurrences over time (seconds)")
-        
         if {"time", "label", "sheep_id"}.issubset(df.columns):
             behaviour_for_line = st.selectbox(
                 "Choose behaviour to plot",
@@ -176,13 +170,13 @@ try:
                 index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
                 key="behaviour_line_select",
             )
-        
+
             # Auto-fallback: if the chosen behaviour isn't in the multiselect filter, query without it
             need_fallback = (
                 bool(selected_behaviours)
                 and behaviour_for_line.lower().strip() not in [b.lower().strip() for b in selected_behaviours]
             )
-        
+
             if need_fallback:
                 st.info(
                     f"Using all behaviours for the chart because '{behaviour_for_line}' "
@@ -200,11 +194,11 @@ try:
                     line_df = pd.DataFrame(line_result)
             else:
                 line_df = df.copy()
-        
+
             # Normalize time + labels
             if "time" in line_df.columns and not pd.api.types.is_datetime64_any_dtype(line_df["time"]):
                 line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
-        
+
             if line_df.empty:
                 st.info("No data available to plot.")
             else:
@@ -214,14 +208,14 @@ try:
                 plot["sheep_id"]  = plot["sheep_id"].astype(str)
                 plot["label_norm"]= plot["label"].astype(str).str.strip().str.lower()
                 target = behaviour_for_line.lower().strip()
-        
+
                 # Keep only seconds where the chosen behaviour occurred (points at y=1)
                 events = (
                     plot.assign(value=(plot["label_norm"] == target).astype(int))
                         .groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
                         .query("value == 1")
                 )
-        
+
                 if events.empty:
                     st.info("No occurrences of the selected behaviour in this window/IDs.")
                 else:
@@ -231,7 +225,7 @@ try:
                         domain_min = pd.to_datetime(start_iso, utc=True)
                         domain_max = pd.to_datetime(end_iso,   utc=True)
                         zoom_x = alt.selection_interval(bind='scales', encodings=['x'])
-        
+
                         chart = (
                             alt.Chart(events)
                             .mark_circle(size=40, opacity=0.9)
@@ -251,7 +245,7 @@ try:
                                 tooltip=[alt.Tooltip("time_sec:T", title="Time"), alt.Tooltip("sheep_id:N", title="Sheep")]
                             )
                             .properties(height=240)
-                            .add_params(zoom_x)  # <- enables pan/zoom on x
+                            .add_params(zoom_x)
                         )
                         st.altair_chart(chart, use_container_width=True)
                         st.caption("Tip: scroll to zoom, drag to pan, double-click to reset.")
@@ -265,7 +259,6 @@ try:
                         st.line_chart(wide)
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour chart.")
-
 
         # --------------- PIE CONTROLS & CHART (AFTER TABLE & LINE) ---------------
         st.divider()
