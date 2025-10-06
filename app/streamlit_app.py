@@ -234,9 +234,9 @@ try:
                         textprops={"fontsize": pie_font},      # smaller text
                         pctdistance=0.8,                       # keep % closer to center
                     )
-ax.axis("equal")
-ax.set_title("Behaviour share (%) in selected window", fontsize=pie_font + 1)
-st.pyplot(fig, use_container_width=False)  # don't stretch to full width
+                    ax.axis("equal")
+                    ax.set_title("Behaviour share (%) in selected window", fontsize=pie_font + 1)
+                    st.pyplot(fig, use_container_width=False)  # don't stretch to full width
 
                     summary = pd.DataFrame({
                         "count": counts.astype(int),
