@@ -44,15 +44,7 @@ if SHOW_DEBUG:
 
 
 
-# --- 2) Connectivity check (v2 health) ---
-try:
-    with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
-        health = client.health()
-        st.success(f"Influx health: {health.status} — {health.message}")
-except Exception as e:
-    st.error("Could not reach InfluxDB. Check URL (region!), org, and token scope.")
-    st.exception(e)
-    st.stop()
+
 
 
 
@@ -380,3 +372,14 @@ try:
 except Exception as e:
     st.error("SQL query or rendering failed. Check URL/Org/Token/Database (bucket), permissions, and query syntax.")
     st.exception(e)
+
+
+# --- 2) Connectivity check (v2 health) ---
+try:
+    with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
+        health = client.health()
+        st.success(f"Influx health: {health.status} — {health.message}")
+except Exception as e:
+    st.error("Could not reach InfluxDB. Check URL (region!), org, and token scope.")
+    st.exception(e)
+    st.stop()
