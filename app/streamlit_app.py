@@ -105,7 +105,7 @@ FROM sheep_behavior_pred
 WHERE sheep_id = '{safe_sheep_id}'
   AND time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
-{behaviour_clause}ORDER BY time DESC
+{behaviour_clause}ORDER BY time ASC
 LIMIT 1000;
 """
 
