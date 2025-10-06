@@ -166,7 +166,7 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
-        # --- BEHAVIOUR OVER TIME (events-only, per-second points; full window) ---
+        # --- BEHAVIOUR OVER TIME (events-only points; interactive zoom) ---
         st.subheader("Behaviour occurrences over time (seconds)")
         
         if {"time", "label", "sheep_id"}.issubset(df.columns):
@@ -177,18 +177,17 @@ try:
                 key="behaviour_line_select",
             )
         
-            # If the chosen behaviour isn't included in the multiselect filter, auto-fallback
+            # Auto-fallback: if the chosen behaviour isn't in the multiselect filter, query without it
             need_fallback = (
                 bool(selected_behaviours)
-                and behaviour_for_line.lower() not in [b.lower().strip() for b in selected_behaviours]
+                and behaviour_for_line.lower().strip() not in [b.lower().strip() for b in selected_behaviours]
             )
         
             if need_fallback:
                 st.info(
-                    f"Auto-using all behaviours for the chart because '{behaviour_for_line}' "
+                    f"Using all behaviours for the chart because '{behaviour_for_line}' "
                     f"is not in the behaviour filter above."
                 )
-                # Re-query ignoring the behaviour filter (use base_sql)
                 with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
                     line_result = client.query(base_sql)
                 if isinstance(line_result, pd.DataFrame):
@@ -200,14 +199,14 @@ try:
                 else:
                     line_df = pd.DataFrame(line_result)
             else:
-                # Use the current (possibly behaviour-filtered) data
                 line_df = df.copy()
         
+            # Normalize time + labels
             if "time" in line_df.columns and not pd.api.types.is_datetime64_any_dtype(line_df["time"]):
                 line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
         
             if line_df.empty:
-                st.info("No data available to plot. Try widening the window or increasing 'Max rows to fetch'.")
+                st.info("No data available to plot.")
             else:
                 plot = line_df.copy()
                 plot["time"]      = pd.to_datetime(plot["time"], utc=True)
@@ -216,7 +215,7 @@ try:
                 plot["label_norm"]= plot["label"].astype(str).str.strip().str.lower()
                 target = behaviour_for_line.lower().strip()
         
-                # Keep only seconds where the chosen behaviour occurred (y=1 points only)
+                # Keep only seconds where the chosen behaviour occurred (points at y=1)
                 events = (
                     plot.assign(value=(plot["label_norm"] == target).astype(int))
                         .groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
@@ -224,38 +223,45 @@ try:
                 )
         
                 if events.empty:
-                    st.info("No occurrences of the selected behaviour in this window/IDs "
-                            "(or increase 'Max rows to fetch').")
+                    st.info("No occurrences of the selected behaviour in this window/IDs.")
                 else:
                     try:
                         import altair as alt
+                        # Force x-axis to full selected window; allow zoom/pan on x
                         domain_min = pd.to_datetime(start_iso, utc=True)
                         domain_max = pd.to_datetime(end_iso,   utc=True)
+                        zoom_x = alt.selection_interval(bind='scales', encodings=['x'])
         
                         chart = (
                             alt.Chart(events)
-                            .mark_circle(size=36, opacity=0.9)
+                            .mark_circle(size=40, opacity=0.9)
                             .encode(
-                                x=alt.X("time_sec:T",
-                                        title="Time",
-                                        scale=alt.Scale(domain=[domain_min, domain_max])),
-                                y=alt.Y("value:Q",
-                                        title="Occurrence",
-                                        scale=alt.Scale(domain=[0, 1.1]),
-                                        axis=alt.Axis(values=[1], labels=False, ticks=False)),
+                                x=alt.X(
+                                    "time_sec:T",
+                                    title="Time",
+                                    scale=alt.Scale(domain=[domain_min, domain_max])
+                                ),
+                                y=alt.Y(
+                                    "value:Q",
+                                    title="Occurrence",
+                                    scale=alt.Scale(domain=[0, 1.1]),
+                                    axis=alt.Axis(values=[1], labels=False, ticks=False)
+                                ),
                                 color=alt.Color("sheep_id:N", title="Sheep ID"),
-                                tooltip=["time_sec:T", "sheep_id:N"]
+                                tooltip=[alt.Tooltip("time_sec:T", title="Time"), alt.Tooltip("sheep_id:N", title="Sheep")]
                             )
-                            .properties(height=220)
+                            .properties(height=240)
+                            .add_params(zoom_x)  # <- enables pan/zoom on x
                         )
                         st.altair_chart(chart, use_container_width=True)
+                        st.caption("Tip: scroll to zoom, drag to pan, double-click to reset.")
                     except Exception:
-                        # Fallback: sparse wide frame with NaNs so only event points draw
+                        # Fallback: sparse wide frame with NaNs (no zeros), still spans full window
                         wide = events.pivot(index="time_sec", columns="sheep_id", values="value").sort_index()
                         full_idx = pd.date_range(start=pd.to_datetime(start_iso, utc=True),
                                                  end=pd.to_datetime(end_iso,   utc=True),
                                                  freq="1S", tz="UTC")
-                        wide = wide.reindex(full_idx)  # keep NaNs where no event -> no zeros drawn
+                        wide = wide.reindex(full_idx)  # NaNs where no event -> no connecting line
                         st.line_chart(wide)
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour chart.")
