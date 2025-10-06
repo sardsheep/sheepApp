@@ -41,15 +41,24 @@ if SHOW_DEBUG:
             "token_prefix": TOKEN[:6] + "..." if isinstance(TOKEN, str) and len(TOKEN) > 6 else "short/invalid",
         })
 
+
+
+
 # --- 2) Connectivity check (v2 health) ---
 try:
     with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
         health = client.health()
-        st.success(f"Influx health: {health.status} — {health.message}")
+        # No green success line; only complain if unhealthy or exception
+        if getattr(health, "status", "").lower() not in ("pass", "healthy", "ok"):
+            st.error(f"Influx health: {health.status} — {health.message}")
+            st.stop()
+        elif SHOW_DEBUG:
+            st.info(f"Influx health: {health.status} — {health.message}")
 except Exception as e:
     st.error("Could not reach InfluxDB. Check URL (region!), org, and token scope.")
     st.exception(e)
     st.stop()
+
 
 # --- 5b) Sheep type radio (Ram/Ewe) + SQL clause (safe fallback if column missing) ---
 sheep_type_choice = st.radio(
