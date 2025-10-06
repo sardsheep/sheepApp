@@ -39,16 +39,33 @@ except Exception as e:
 
 
 
-# NEW: sheep type filter (1=Ram, 2=EWE; includes 'Any' to disable the filter)
-sheep_type = st.selectbox(
+# RADIO: 1 = Ram, 2 = EWE (+ 'Any' to disable the filter)
+choice = st.radio(
     "Sheep type",
-    options=["Any", "Ram", "EWE"],
+    options=["Any", "Ram (1)", "EWE (2)"],
     index=0,
-    help="1 = Ram, 2 = EWE"
+    help="Filter by sheep type (1 = Ram, 2 = EWE)"
 )
 
-# Build optional type clause (change 'sheep_type' to your actual column if different)
-type_clause = "" if sheep_type == "Any" else f"  AND LOWER(sheep_type) = LOWER('{sheep_type}')\n"
+# Normalize the selection to the label you'd store in DB
+# If your column stores text like 'Ram'/'EWE', keep this:
+type_value = None
+if choice == "Ram (1)":
+    type_value = "Ram"
+elif choice == "EWE (2)":
+    type_value = "EWE"
+
+# Build the WHERE clause part
+# Text column version (default). If your column is named differently, change 'sheep_type'.
+type_clause = "" if type_value is None else f"  AND LOWER(sheep_type) = LOWER('{type_value}')\n"
+
+# --- If your DB stores numbers (1/2) instead of text, use this instead of the line above:
+# num_value = None
+# if choice == "Ram (1)":
+#     num_value = 1
+# elif choice == "EWE (2)":
+#     num_value = 2
+# type_clause = "" if num_value is None else f"  AND sheep_type = {num_value}\n"
 
 
 
