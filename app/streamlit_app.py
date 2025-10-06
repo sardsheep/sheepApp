@@ -161,51 +161,80 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
-        # --- BEHAVIOUR OVER TIME (multi-sheep colored lines, second-based) ---
+        # --- BEHAVIOUR OVER TIME (multi-sheep lines, second-based) ---
         st.subheader("Behaviour occurrences over time (seconds)")
+        
         if {"time", "label", "sheep_id"}.issubset(df.columns):
             behaviour_for_line = st.selectbox(
                 "Choose behaviour to plot",
                 options=ALL_BEHAVIOURS,
                 index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
-                key="behaviour_line_select"
+                key="behaviour_line_select",
             )
         
-            # choose the second step (1s default). Bigger steps avoid huge plots over long windows.
-            second_step = st.selectbox("Time step (seconds)", [1, 2, 5, 10, 15, 30, 60], index=0, key="sec_step")
-        
-            plot = df.copy()
-            plot["time"] = pd.to_datetime(plot["time"], utc=True)
-            plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
-            target = behaviour_for_line.lower()
-            plot["value"] = (plot["label_norm"] == target).astype(int)
-            plot["sheep_id"] = plot["sheep_id"].astype(str)
-        
-            # Bin to whole seconds so each second has at most one value per sheep
-            plot["time_sec"] = plot["time"].dt.floor("S")
-            plot = plot.groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
-        
-            # Wide format: one column per sheep, index at second resolution
-            pivot = (
-                plot.pivot(index="time_sec", columns="sheep_id", values="value")
-                    .fillna(0)
-                    .sort_index()
+            # Use/ignore the behaviour multiselect for the line chart
+            line_basis = st.radio(
+                "Line chart basis",
+                options=["Use behaviour filter", "Ignore behaviour filter (all behaviours)"],
+                index=0,
+                key="line_basis_radio",
+                help="If the behaviour you choose isn't in the multiselect above, select 'Ignore' here."
             )
         
-            # Build a continuous second grid to include seconds with no events
-            start_idx = pivot.index.min()
-            end_idx   = pivot.index.max()
-            if pd.notna(start_idx) and pd.notna(end_idx):
-                # If user picked a step > 1s, resample using max (occurrence in that bin)
-                freq = f"{second_step}S"
-                idx = pd.date_range(start=start_idx, end=end_idx, freq="1S", tz="UTC")
-                pivot = pivot.reindex(idx).fillna(0)
-                if second_step != 1:
-                    pivot = pivot.resample(freq).max().fillna(0)
+            # If using the filter and chosen behaviour isn't included, warn the user
+            if selected_behaviours and behaviour_for_line.lower() not in [b.lower() for b in selected_behaviours]:
+                st.warning(
+                    f"'{behaviour_for_line}' is not in the behaviour filter above. "
+                    f"The line would be all zeros. Either add it to the filter or switch basis to 'Ignore'."
+                )
         
-                st.line_chart(pivot)
+            # Decide which dataset to use for the line
+            if line_basis.startswith("Use"):
+                line_df = df.copy()
             else:
-                st.info("No timestamps available to plot at second resolution.")
+                # Re-query ignoring the behaviour filter (like base_sql)
+                with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
+                    line_result = client.query(base_sql)
+                if isinstance(line_result, pd.DataFrame):
+                    line_df = line_result
+                elif isinstance(line_result, pa.Table):
+                    line_df = line_result.to_pandas()
+                elif isinstance(line_result, list) and line_result and isinstance(line_result[0], pa.Table):
+                    line_df = pd.concat([t.to_pandas() for t in line_result], ignore_index=True)
+                else:
+                    line_df = pd.DataFrame(line_result)
+                if "time" in line_df.columns and not pd.api.types.is_datetime64_any_dtype(line_df["time"]):
+                    line_df["time"] = pd.to_datetime(line_df["time"], errors="coerce", utc=True)
+        
+            if line_df.empty:
+                st.info("No data available to plot.")
+            else:
+                # Build a 0/1 signal for the chosen behaviour, per sheep, at second resolution
+                plot = line_df.copy()
+                plot["time"] = pd.to_datetime(plot["time"], utc=True)
+                plot["sheep_id"] = plot["sheep_id"].astype(str)
+                plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
+                target = behaviour_for_line.lower()
+                plot["value"] = (plot["label_norm"] == target).astype(int)
+        
+                # One point per second per sheep: any occurrence in that second -> 1
+                plot["time_sec"] = plot["time"].dt.floor("S")
+                plot = plot.groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
+        
+                # Pivot to wide (one column per sheep)
+                pivot = (
+                    plot.pivot(index="time_sec", columns="sheep_id", values="value")
+                        .fillna(0)
+                        .sort_index()
+                )
+        
+                # Fill missing seconds so the baseline is visible
+                if not pivot.empty:
+                    full_idx = pd.date_range(pivot.index.min(), pivot.index.max(), freq="1S", tz="UTC")
+                    pivot = pivot.reindex(full_idx).fillna(0)
+                    st.line_chart(pivot)  # Streamlit will color lines by sheep_id
+                else:
+                    st.info("No occurrences of the selected behaviour in the chosen window/IDs.")
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour line chart.")
 
