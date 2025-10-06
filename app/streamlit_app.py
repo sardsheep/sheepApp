@@ -42,7 +42,7 @@ except Exception as e:
 # RADIO: 1 = Ram, 2 = EWE (+ 'Any' to disable the filter)
 choice = st.radio(
     "Sheep type",
-    options=["Any", "Ram ", "EWE "],
+    options=["Any", "Ram ", "Ewe "],
     index=0
 )
 
@@ -51,8 +51,8 @@ choice = st.radio(
 type_value = None
 if choice == "Ram":
     type_value = "Ram"
-elif choice == "EWE":
-    type_value = "EWE"
+elif choice == "Ewe":
+    type_value = "Ewe"
 
 # Build the WHERE clause part
 # Text column version (default). If your column is named differently, change 'sheep_type'.
