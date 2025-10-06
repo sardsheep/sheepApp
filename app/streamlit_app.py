@@ -242,12 +242,7 @@ try:
                     fig.tight_layout(pad=0.4)
                     st.pyplot(fig, use_container_width=False)
 
-                    summary = pd.DataFrame({
-                        "behaviour": known,
-                        "count": counts.astype(int).values,
-                        "percent": (counts / total * 100).round(2).values,
-                    })
-                    st.dataframe(summary)
+
                 else:
                     st.info("No behaviour labels found in the selected window to plot.")
             else:
