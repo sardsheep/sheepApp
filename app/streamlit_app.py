@@ -161,8 +161,8 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
-        # --- BEHAVIOUR OVER TIME (multi-sheep colored lines) ---
-        st.subheader("Behaviour occurrences over time")
+        # --- BEHAVIOUR OVER TIME (multi-sheep colored lines, second-based) ---
+        st.subheader("Behaviour occurrences over time (seconds)")
         if {"time", "label", "sheep_id"}.issubset(df.columns):
             behaviour_for_line = st.selectbox(
                 "Choose behaviour to plot",
@@ -170,24 +170,45 @@ try:
                 index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
                 key="behaviour_line_select"
             )
-
+        
+            # choose the second step (1s default). Bigger steps avoid huge plots over long windows.
+            second_step = st.selectbox("Time step (seconds)", [1, 2, 5, 10, 15, 30, 60], index=0, key="sec_step")
+        
             plot = df.copy()
+            plot["time"] = pd.to_datetime(plot["time"], utc=True)
             plot["label_norm"] = plot["label"].astype(str).str.strip().str.lower()
             target = behaviour_for_line.lower()
-            # 1 when the chosen behaviour occurs, else 0
             plot["value"] = (plot["label_norm"] == target).astype(int)
-            # one value per time & sheep_id (in case of duplicates)
             plot["sheep_id"] = plot["sheep_id"].astype(str)
-            plot = plot.groupby(["time", "sheep_id"], as_index=False)["value"].max()
-            # pivot to wide for Streamlit's multi-line chart (one column per sheep)
-            pivot = plot.pivot(index="time", columns="sheep_id", values="value").fillna(0).sort_index()
-
-            if not pivot.empty:
-                st.line_chart(pivot)  # auto different colors per sheep (columns)
+        
+            # Bin to whole seconds so each second has at most one value per sheep
+            plot["time_sec"] = plot["time"].dt.floor("S")
+            plot = plot.groupby(["time_sec", "sheep_id"], as_index=False)["value"].max()
+        
+            # Wide format: one column per sheep, index at second resolution
+            pivot = (
+                plot.pivot(index="time_sec", columns="sheep_id", values="value")
+                    .fillna(0)
+                    .sort_index()
+            )
+        
+            # Build a continuous second grid to include seconds with no events
+            start_idx = pivot.index.min()
+            end_idx   = pivot.index.max()
+            if pd.notna(start_idx) and pd.notna(end_idx):
+                # If user picked a step > 1s, resample using max (occurrence in that bin)
+                freq = f"{second_step}S"
+                idx = pd.date_range(start=start_idx, end=end_idx, freq="1S", tz="UTC")
+                pivot = pivot.reindex(idx).fillna(0)
+                if second_step != 1:
+                    pivot = pivot.resample(freq).max().fillna(0)
+        
+                st.line_chart(pivot)
             else:
-                st.info("No data for the selected behaviour to plot.")
+                st.info("No timestamps available to plot at second resolution.")
         else:
             st.info("Required columns ('time', 'label', 'sheep_id') are missing; cannot draw the behaviour line chart.")
+
 
         # --------------- PIE CONTROLS & CHART (AFTER TABLE & LINE) ---------------
         st.divider()
