@@ -44,6 +44,20 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+# --- 5b) Sheep type radio (Ram/Ewe) + SQL clause (safe fallback if column missing) ---
+sheep_type_choice = st.radio(
+    "Sheep type",
+    options=["Any", "Ram", "Ewe"],
+    index=0,
+    horizontal=True,
+    key="sheep_type_radio",
+)
+type_clause = ""
+if sheep_type_choice != "Any":
+    # NOTE: change 'sheep_type' to your actual column name if different.
+    type_clause = f"  AND LOWER(TRIM(sheep_type)) = '{sheep_type_choice.lower().strip()}'\n"
+
+
 # --- 3) Inputs: explicit start/end date & time (local) ---
 today_local = datetime.now(TZ_LOCAL).date()
 default_start_date = today_local - timedelta(days=30)
@@ -110,18 +124,7 @@ if selected_behaviours:
     beh_in_list = ",".join("'" + b.replace("'", "''").lower().strip() + "'" for b in selected_behaviours)
     behaviour_clause = f"  AND LOWER(TRIM(label)) IN ({beh_in_list})\n"
 
-# --- 5b) Sheep type radio (Ram/Ewe) + SQL clause (safe fallback if column missing) ---
-sheep_type_choice = st.radio(
-    "Sheep type",
-    options=["Any", "Ram", "Ewe"],
-    index=0,
-    horizontal=True,
-    key="sheep_type_radio",
-)
-type_clause = ""
-if sheep_type_choice != "Any":
-    # NOTE: change 'sheep_type' to your actual column name if different.
-    type_clause = f"  AND LOWER(TRIM(sheep_type)) = '{sheep_type_choice.lower().strip()}'\n"
+
 
 # --- 6) SQL (chronological: ASC) ---
 ROW_LIMIT = 500_000  # fixed default
