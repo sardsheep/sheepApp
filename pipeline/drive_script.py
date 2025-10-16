@@ -170,12 +170,14 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
             y_col = find_col(chunk, "Y", ["y", "acc_y", "accel_y"])
             z_col = find_col(chunk, "Z", ["z", "acc_z", "accel_z"])
             t_col = find_col(chunk, "time", ["Time", "timestamp", "datetime"])
+            type_col = find_col(chunk, "type", ["Type"])  # <-- added
+
         except ValueError as e:
             print(f"⚠️ Skipping chunk: {e}", flush=True)
             continue
 
         # Keep only needed columns
-        chunk = chunk[[x_col, y_col, z_col, t_col]].dropna()
+        chunk = chunk[[x_col, y_col, z_col, t_col, type_col]].dropna()
         n = len(chunk)
         print(f"   After filtering, {n} rows remain", flush=True)
 
@@ -188,16 +190,18 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
         y = chunk[y_col].to_numpy()
         z = chunk[z_col].to_numpy()
         t = chunk[t_col].to_numpy()
-
+        typ = chunk[type_col].to_numpy()
         usable = (n // window) * window
-        x = x[:usable]; y = y[:usable]; z = z[:usable]; t = t[:usable]
+        x = x[:usable]; y = y[:usable]; z = z[:usable]; t = t[:usable]; typ = typ[:usable]
 
         # Reshape into (num_windows, window)
         xw = x.reshape(-1, window)
         yw = y.reshape(-1, window)
         zw = z.reshape(-1, window)
         tw = t.reshape(-1, window)
+        typew = typ.reshape(-1, window)
 
+        
         print(f"   ✅ Creating {xw.shape[0]} flattened rows", flush=True)
 
         # Build flattened rows
@@ -209,6 +213,7 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
                 row[f"z_{j+1}"] = zw[i, j]
             # Use last time in window
             row["Time"] = tw[i, -1]
+            row["type"] = typew[i, -1]
             flattened_rows.append(row)
 
     if not flattened_rows:
@@ -216,7 +221,7 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
         cols = [*(f"x_{i}" for i in range(1, window+1)),
                 *(f"y_{i}" for i in range(1, window+1)),
                 *(f"z_{i}" for i in range(1, window+1)),
-                "Time"]
+                "Time", "type"]
         pd.DataFrame(columns=cols).to_csv(output_path, index=False)
         return
 
