@@ -15,7 +15,7 @@ if not (URL and TOKEN and ORG and BUCKET):
     sys.exit(1)
 
 def find_ts_col(df):
-    for c in ["timestamp","time","real Time","real_time","video_time"]:
+    for c in ["timestamp","time", "Time","real Time","real_time","video_time"]:
         if c in df.columns: return c
     return None
 
