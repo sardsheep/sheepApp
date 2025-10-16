@@ -36,6 +36,11 @@ def to_points(df: pd.DataFrame, src_name: str):
         raise ValueError(f"Could not parse timestamps from '{tcol}'.")
 
     sheep_col = next((c for c in ["sheep number","sheep_id","sheep"] if c in df.columns), None)
+
+        # NEW: support both 'type' and 'Type' (case-tolerant)
+    type_col = next((c for c in ["type","Type"] if c in df.columns), None)
+
+
     if "predict" not in df.columns:    raise ValueError("Missing 'predict' column.")
     if "confidence" not in df.columns: raise ValueError("Missing 'confidence' column.")
 
@@ -50,6 +55,12 @@ def to_points(df: pd.DataFrame, src_name: str):
               .time(ts.to_pydatetime(), WritePrecision.NS)
         if sheep_col and pd.notna(row[sheep_col]):
             p = p.tag("sheep_id", str(row[sheep_col]))
+
+        # ✅ NEW: write 'type' as a tag (only if present and not NaN)
+        if type_col and pd.notna(row[type_col]):
+            p = p.tag("type", str(row[type_col]))
+
+        
         yield p
 
 def ingest(paths):
