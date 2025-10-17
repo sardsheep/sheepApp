@@ -38,7 +38,7 @@ def to_points(df: pd.DataFrame, src_name: str):
     sheep_col = next((c for c in ["sheep number","sheep_id","sheep"] if c in df.columns), None)
 
         # NEW: support both 'type' and 'Type' (case-tolerant)
-    type_col = next((c for c in ["type","Type"] if c in df.columns), None)
+    type_col = next((c for c in ["type", "Type", "sheep_type"] if c in df.columns), None)
 
 
     if "predict" not in df.columns:    raise ValueError("Missing 'predict' column.")
@@ -57,8 +57,10 @@ def to_points(df: pd.DataFrame, src_name: str):
             p = p.tag("sheep_id", str(row[sheep_col]))
 
         # ✅ NEW: write 'type' as a tag (only if present and not NaN)
-        if type_col and pd.notna(row[type_col]):
-            p = p.tag("type", str(row[type_col]))
+        if type_col:
+            val = str(row[type_col]).strip() if pd.notna(row[type_col]) else ""
+            if val:  # only add non-empty strings
+                p = p.tag("type", val.lower())
 
         
         yield p
