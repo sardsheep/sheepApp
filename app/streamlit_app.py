@@ -57,9 +57,29 @@ sheep_type_choice = st.radio(
     key="sheep_type_radio",
 )
 type_clause = ""
-if sheep_type_choice != "Any":
-    # NOTE: change 'sheep_type' to your actual column name if different.
-    type_clause = f"  AND LOWER(TRIM(sheep_type)) = '{sheep_type_choice.lower().strip()}'\n"
+sheep_type_choice = st.radio(
+    "Sheep type",
+    options=["Any", "Ram", "Ewe"],
+    index=0,
+    horizontal=True,
+    key="sheep_type_radio",
+)
+
+# Define which IDs correspond to Rams vs Ewes
+RAM_IDS  = ["1", "2", "3", "4", "5"]
+EWE_IDS  = ["6", "7", "8", "9", "10"]
+
+
+# Build clause based on selection
+type_clause = ""
+if sheep_type_choice == "Ram":
+    id_list = ",".join(f"'{sid}'" for sid in RAM_IDS)
+    type_clause = f"  AND sheep_id IN ({id_list})\n"
+elif sheep_type_choice == "Ewe":
+    id_list = ",".join(f"'{sid}'" for sid in EWE_IDS)
+    type_clause = f"  AND sheep_id IN ({id_list})\n"
+
+
 
 
 # --- 3) Inputs: explicit start/end date & time (local) ---
