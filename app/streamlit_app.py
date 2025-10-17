@@ -49,13 +49,7 @@ if SHOW_DEBUG:
 
 
 # --- 5b) Sheep type radio (Ram/Ewe) + SQL clause (safe fallback if column missing) ---
-sheep_type_choice = st.radio(
-    "Sheep type",
-    options=["Any", "Ram", "Ewe"],
-    index=0,
-    horizontal=True,
-    key="sheep_type_radio",
-)
+
 type_clause = ""
 sheep_type_choice = st.radio(
     "Sheep type",
