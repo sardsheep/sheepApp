@@ -136,7 +136,7 @@ st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
 def build_sql(include_type: bool, include_behaviour: bool, limit: int = ROW_LIMIT) -> str:
     return f"""
-SELECT time, confidence, label, sheep_id
+SELECT time, confidence, label, sheep_id{(", type" if include_type else "")}
 FROM sheep_behavior_pred
 WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
