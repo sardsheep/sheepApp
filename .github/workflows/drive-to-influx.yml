@@ -49,7 +49,9 @@ jobs:
 
       - name: Download labeled CSV(s) from Google Drive
         env:
-          DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+          #DRIVE_FOLDER_ID: ${{ github.event.inputs.drive_folder_id }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}   # ✅ use your secret here
+
           CSV_FILENAME: ${{ github.event.inputs.csv_filename }}
           NAME_CONTAINS: ${{ github.event.inputs.name_contains }}
           DOWNLOAD_ALL: ${{ github.event.inputs.download_all }}
