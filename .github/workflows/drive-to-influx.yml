@@ -3,9 +3,6 @@ name: Push labeled CSV from Drive to InfluxDB Cloud
 on:
   workflow_dispatch:
     inputs:
-      drive_folder_id:
-        description: "Google Drive folder ID containing labeled CSV(s)"
-        required: true
       csv_filename:
         description: "Exact CSV name (leave empty to pick the most recent)"
         required: false
