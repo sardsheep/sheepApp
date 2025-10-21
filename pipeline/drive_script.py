@@ -144,13 +144,18 @@ def upload_new_file(service, local_path: Path, source_file_id: str):
 # Flatten CSV logic
 # =========================
 
-def find_col(df, target, fallbacks):
+
+def find_col(df, target, fallbacks, required=True):
     cols = {c.lower(): c for c in df.columns}
     for name in [target, *fallbacks]:
         c = cols.get(name.lower())
         if c:
             return c
-    raise ValueError(f"Required column '{target}' not found. Available: {list(df.columns)}")
+    if required:
+        raise ValueError(f"Required column '{target}' not found. Available: {list(df.columns)}")
+    return None
+
+
 
 
 def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, window: int = 30):
@@ -172,35 +177,60 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
             t_col = find_col(chunk, "time", ["Time", "timestamp", "datetime"])
             type_col = find_col(chunk, "type", ["Type"])  # <-- added
 
+            # NEW: optional sheep id column (auto-detect if present)
+            sheep_col = find_col(
+                chunk,
+                "sheep_id",
+                ["Sheep ID", "sheep number", "sheep", "id"],
+                required=False
+            )
+     
         except ValueError as e:
             print(f"⚠️ Skipping chunk: {e}", flush=True)
             continue
 
-        # Keep only needed columns
-        chunk = chunk[[x_col, y_col, z_col, t_col, type_col]].dropna()
+
+
+        # keep only needed columns (don't force sheep to be non-null)
+        cols_keep = [x_col, y_col, z_col, t_col, type_col] + ([sheep_col] if sheep_col else [])
+        chunk = chunk[cols_keep].dropna(subset=[x_col, y_col, z_col, t_col, type_col])
         n = len(chunk)
         print(f"   After filtering, {n} rows remain", flush=True)
-
         if n < window:
             print(f"   ⚠️ Not enough rows for one full window (need {window}, got {n})", flush=True)
             continue
 
+        
         # Convert to numpy for speed
         x = chunk[x_col].to_numpy()
         y = chunk[y_col].to_numpy()
         z = chunk[z_col].to_numpy()
         t = chunk[t_col].to_numpy()
         typ = chunk[type_col].to_numpy()
-        usable = (n // window) * window
-        x = x[:usable]; y = y[:usable]; z = z[:usable]; t = t[:usable]; typ = typ[:usable]
 
+        if sheep_col:
+            shp = chunk[sheep_col].astype("string").to_numpy()
+        else:
+            shp = None
+
+        
+
+
+        usable = (n // window) * window
+        x, y, z, t, typ = x[:usable], y[:usable], z[:usable], t[:usable], typ[:usable]
+        if shp is not None:
+            shp = shp[:usable]
+
+
+        
         # Reshape into (num_windows, window)
         xw = x.reshape(-1, window)
         yw = y.reshape(-1, window)
         zw = z.reshape(-1, window)
         tw = t.reshape(-1, window)
         typew = typ.reshape(-1, window)
-
+        if shp is not None:
+            sheepw = shp.reshape(-1, window)
         
         print(f"   ✅ Creating {xw.shape[0]} flattened rows", flush=True)
 
@@ -214,20 +244,31 @@ def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, w
             # Use last time in window
             row["Time"] = tw[i, -1]
             row["type"] = typew[i, -1]
+
+
+            # NEW: sheep_id (prefer source column's last value in the window, else constant)
+            if shp is not None:
+                row["sheep_id"] = str(sheepw[i, -1])
+            elif sheep_id_const is not None:
+                row["sheep_id"] = str(sheep_id_const)
+            else:
+                # still include the column (empty) so downstream schema is stable
+                row["sheep_id"] = ""
+
             flattened_rows.append(row)
+
 
     if not flattened_rows:
         print("⚠️ No flattened rows created! Writing empty CSV with headers only.", flush=True)
         cols = [*(f"x_{i}" for i in range(1, window+1)),
                 *(f"y_{i}" for i in range(1, window+1)),
                 *(f"z_{i}" for i in range(1, window+1)),
-                "Time", "type"]
+                "Time", "type", "sheep_id"]   # <-- include sheep_id header
         pd.DataFrame(columns=cols).to_csv(output_path, index=False)
         return
 
     pd.DataFrame(flattened_rows).to_csv(output_path, index=False)
     print(f"✅ Flattened file saved: {output_path} with {len(flattened_rows)} rows", flush=True)
-
 
 # =========================
 # Main workflow
@@ -245,6 +286,8 @@ def main():
     ap.add_argument("--window", type=int, default=30, help="Window size")
     ap.add_argument("--overwrite", action="store_true",
                     help="Overwrite original file instead of creating <name>__flattened.csv")
+    ap.add_argument("--sheep-id-const", default=None,
+                    help="Optional constant sheep_id to write when the source has no sheep column")
     args = ap.parse_args()
 
     file_id = args.file_id.strip()
@@ -263,9 +306,12 @@ def main():
     download_file(service, file_id, local_in)
 
     print("🔧 Flattening CSV...", flush=True)
-    flatten_file(local_in, local_out,
-                 chunk_size=args.chunk_size,
-                 window=args.window)
+    flatten_file(
+        local_in, local_out,
+        chunk_size=args.chunk_size,
+        window=args.window,
+        sheep_id_const=args.sheep_id_const
+    )
 
     print("⬆️ Uploading flattened file back to Drive...", flush=True)
     if args.overwrite:
