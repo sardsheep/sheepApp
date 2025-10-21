@@ -158,7 +158,14 @@ def find_col(df, target, fallbacks, required=True):
 
 
 
-def flatten_file(input_path: Path, output_path: Path, chunk_size: int = 30000, window: int = 30):
+
+def flatten_file(
+    input_path: Path,
+    output_path: Path,
+    chunk_size: int = 30000,
+    window: int = 30,
+    sheep_id_const: str | None = None,   # <-- add this
+):
     print(f"📂 Flattening {input_path} → {output_path} (chunk={chunk_size}, window={window})", flush=True)
 
     if chunk_size % window != 0:
@@ -312,6 +319,7 @@ def main():
         window=args.window,
         sheep_id_const=args.sheep_id_const
     )
+
 
     print("⬆️ Uploading flattened file back to Drive...", flush=True)
     if args.overwrite:
