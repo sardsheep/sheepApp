@@ -19,6 +19,73 @@ SHOW_DEBUG = False  # set True if you want to see connection info / health
 st.set_page_config(page_title="Sheep Behavior — SQL", layout="wide")
 st.title("🐑 Sheep Behavior")
 
+
+
+
+
+
+
+# --- Simple LLM Chat (works on Streamlit Cloud) ---
+from openai import OpenAI
+
+st.header("💬 Chat with the AI")
+
+# Read API key from Streamlit Secrets
+try:
+    client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+except Exception:
+    st.error("Missing OpenAI key. Add it under Secrets as [openai].api_key")
+    st.stop()
+
+# Initialize chat history (with a friendly system prompt)
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = [
+        {"role": "system", "content": "You are a friendly assistant for a sheep behavior dashboard."}
+    ]
+
+# Show prior messages (skip the system one)
+for m in st.session_state.chat_messages:
+    if m["role"] == "user":
+        with st.chat_message("user"):
+            st.markdown(m["content"])
+    elif m["role"] == "assistant":
+        with st.chat_message("assistant"):
+            st.markdown(m["content"])
+
+# Input box at the bottom
+prompt = st.chat_input("Say hello 👋")
+if prompt:
+    # Add and render user message
+    st.session_state.chat_messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Call the model
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",  # small/cheap; swap for a larger model if you like
+            messages=st.session_state.chat_messages,
+            temperature=0.7,
+        )
+        answer = resp.choices[0].message.content
+    except Exception as e:
+        answer = f"Oops, I couldn't reply: {e}"
+
+    # Add and render assistant message
+    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+
+
+
+
+
+
+
+
+
+
 # --- 1) Secrets ---
 try:
     cfg = st.secrets["influx"]
