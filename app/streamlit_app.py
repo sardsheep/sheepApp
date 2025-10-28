@@ -14,14 +14,6 @@ except Exception:
 
 
 
-from openai import OpenAI
-import streamlit as st
-
-client = OpenAI(api_key=st.secrets["openai"]["api_key"])
-
-
-
-
 # --- Debug toggles ---
 SHOW_DEBUG = False  # set True if you want to see connection info / health
 
