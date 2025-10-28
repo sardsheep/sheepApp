@@ -35,53 +35,51 @@ st.title("🐑 Sheep Behavior")
 
 
 
-# --- Simple LLM Chat (works on Streamlit Cloud) ---
+# --- Simple LLM Chat (Groq cloud API) ---
+import streamlit as st
 from openai import OpenAI
 
 st.header("💬 Chat with the AI")
 
-# Read API key from Streamlit Secrets
+# Try to connect to Groq (free cloud API)
 try:
-    client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=st.secrets["groq"]["api_key"]
+    )
+    model_name = "llama3-8b-8192"  # or "mixtral-8x7b-32768"
 except Exception:
-    st.error("Missing OpenAI key. Add it under Secrets as [openai].api_key")
+    st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
     st.stop()
 
-# Initialize chat history (with a friendly system prompt)
+# Initialize chat history
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
         {"role": "system", "content": "You are a friendly assistant for a sheep behavior dashboard."}
     ]
 
-# Show prior messages (skip the system one)
-for m in st.session_state.chat_messages:
-    if m["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(m["content"])
-    elif m["role"] == "assistant":
-        with st.chat_message("assistant"):
-            st.markdown(m["content"])
+# Display previous messages
+for m in st.session_state.chat_messages[1:]:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
-# Input box at the bottom
-prompt = st.chat_input("Say hello 👋")
+# Chat input
+prompt = st.chat_input("Ask something about sheep behavior 🐑")
 if prompt:
-    # Add and render user message
     st.session_state.chat_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Call the model
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",  # small/cheap; swap for a larger model if you like
+            model=model_name,
             messages=st.session_state.chat_messages,
             temperature=0.7,
         )
         answer = resp.choices[0].message.content
     except Exception as e:
-        answer = f"Oops, I couldn't reply: {e}"
+        answer = f"⚠️ Chat error: {e}"
 
-    # Add and render assistant message
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.markdown(answer)
