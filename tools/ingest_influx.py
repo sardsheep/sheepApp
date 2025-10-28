@@ -73,16 +73,7 @@ def ingest(paths):
 
 
             
-            # normalize headers to what the script expects
-            df = df.rename(columns={
-    "behavour": "type",        # fix typo
-    "label": "predict",        # if some files use 'label'
-    "sheep number": "sheep_id",
-    "sheep": "sheep_id",
-    "real_time": "time",
-    "real Time": "time",
-    "Time": "time"             # unify to 'time' if you prefer
-})
+
 
 
             
