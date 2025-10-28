@@ -70,6 +70,22 @@ def ingest(paths):
         write_api = client.write_api(write_options=WriteOptions(batch_size=5000, flush_interval=5000))
         for pth in paths:
             df = pd.read_csv(pth)
+
+
+            
+            # normalize headers to what the script expects
+            df = df.rename(columns={
+    "behavour": "type",        # fix typo
+    "label": "predict",        # if some files use 'label'
+    "sheep number": "sheep_id",
+    "sheep": "sheep_id",
+    "real_time": "time",
+    "real Time": "time",
+    "Time": "time"             # unify to 'time' if you prefer
+})
+
+
+            
             recs = list(to_points(df, Path(pth).name))
             if recs:
                 write_api.write(bucket=BUCKET, record=recs)
