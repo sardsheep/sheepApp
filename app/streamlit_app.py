@@ -27,87 +27,6 @@ st.title("🐑 Sheep Behavior")
 
 
 
-# --- Simple LLM Chat (Groq cloud API) ---
-import streamlit as st
-from openai import OpenAI
-
-st.header("💬 Chat with the AI")
-
-# --- Simple LLM Chat (Groq cloud API + InfluxDB context) ---
-st.header("💬 Chat with the AI")
-
-# Try to connect to Groq (free cloud API)
-try:
-    client = OpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=st.secrets["groq"]["api_key"]
-    )
-    model_name = "llama-3.1-8b-instant"  # or "llama-3.1-70b-versatile"
-except Exception:
-    st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
-    st.stop()
-
-# Initialize chat history
-if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = [
-        {"role": "system", "content": (
-            "You are an assistant that helps analyze sheep behavior data stored in InfluxDB. "
-            "The user can ask questions like 'average grazing time', 'most active sheep', etc. "
-            "Use the data summary provided below when answering."
-        )}
-    ]
-
-# Display previous messages
-for m in st.session_state.chat_messages[1:]:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
-
-# Chat input
-prompt = st.chat_input("Ask something about sheep behavior 🐑")
-if prompt:
-    st.session_state.chat_messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # Attach context: small data summary (for performance)
-    if 'df' in locals() and not df.empty:
-        context_summary = (
-            f"Recent data summary (up to 20 rows):\n\n"
-            f"{df[['sheep_id', 'label', 'confidence', 'time']].tail(20).to_string(index=False)}\n\n"
-            "Columns: time (UTC), sheep_id, behavior label, confidence."
-        )
-    else:
-        context_summary = "No recent data available from InfluxDB."
-
-    # Add context as an extra system message
-    context_msg = {"role": "system", "content": context_summary}
-    messages = st.session_state.chat_messages + [context_msg]
-
-    try:
-        resp = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            temperature=0.6,
-        )
-        answer = resp.choices[0].message.content
-    except Exception as e:
-        answer = f"⚠️ Chat error: {e}"
-
-    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-
-
-
-
-
-
-
-
-
-
-
-
 # --- 1) Secrets ---
 try:
     cfg = st.secrets["influx"]
@@ -475,6 +394,101 @@ try:
 except Exception as e:
     st.error("SQL query or rendering failed. Check URL/Org/Token/Database (bucket), permissions, and query syntax.")
     st.exception(e)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Simple LLM Chat (Groq cloud API) ---
+import streamlit as st
+from openai import OpenAI
+
+st.header("💬 Chat with the AI")
+
+# --- Simple LLM Chat (Groq cloud API + InfluxDB context) ---
+st.header("💬 Chat with the AI")
+
+# Try to connect to Groq (free cloud API)
+try:
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=st.secrets["groq"]["api_key"]
+    )
+    model_name = "llama-3.1-8b-instant"  # or "llama-3.1-70b-versatile"
+except Exception:
+    st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
+    st.stop()
+
+# Initialize chat history
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = [
+        {"role": "system", "content": (
+            "You are an assistant that helps analyze sheep behavior data stored in InfluxDB. "
+            "The user can ask questions like 'average grazing time', 'most active sheep', etc. "
+            "Use the data summary provided below when answering."
+        )}
+    ]
+
+# Display previous messages
+for m in st.session_state.chat_messages[1:]:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
+
+# Chat input
+prompt = st.chat_input("Ask something about sheep behavior 🐑")
+if prompt:
+    st.session_state.chat_messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Attach context: small data summary (for performance)
+    if 'df' in locals() and not df.empty:
+        context_summary = (
+            f"Recent data summary (up to 20 rows):\n\n"
+            f"{df[['sheep_id', 'label', 'confidence', 'time']].tail(20).to_string(index=False)}\n\n"
+            "Columns: time (UTC), sheep_id, behavior label, confidence."
+        )
+    else:
+        context_summary = "No recent data available from InfluxDB."
+
+    # Add context as an extra system message
+    context_msg = {"role": "system", "content": context_summary}
+    messages = st.session_state.chat_messages + [context_msg]
+
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=0.6,
+        )
+        answer = resp.choices[0].message.content
+    except Exception as e:
+        answer = f"⚠️ Chat error: {e}"
+
+    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # --- 2) Connectivity check (v2 health) ---
