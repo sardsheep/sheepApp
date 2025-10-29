@@ -39,7 +39,7 @@ try:
         base_url="https://api.groq.com/openai/v1",
         api_key=st.secrets["groq"]["api_key"]
     )
-    model_name = "llama3-8b-8192"  # or "mixtral-8x7b-32768"
+    model_name = "llama-3.1-8b-instant" # or "mixtral-8x7b-32768"
 except Exception:
     st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
     st.stop()
