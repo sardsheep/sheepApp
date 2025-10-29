@@ -454,7 +454,7 @@ if prompt:
     if 'df' in locals() and not df.empty:
         context_summary = (
             f"Recent data summary (up to 20 rows):\n\n"
-            f"{df[['sheep_id', 'label', 'confidence', 'time', 'type']].tail(20).to_string(index=False)}\n\n"
+            f"{df[['sheep_id', 'label', 'confidence', 'time']].tail(20).to_string(index=False)}\n\n"
             "Columns: time (UTC), sheep_id, behavior label, confidence."
         )
     else:
