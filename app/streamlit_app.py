@@ -414,14 +414,14 @@ except Exception as e:
 st.header("💬 Chat with the AI")
 
 from openai import OpenAI
-import streamlit as st
+
 # Try to connect to Groq (free cloud API)
 try:
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=st.secrets["groq"]["api_key"]
     )
-    model_name = "llama-3.1-8b-instant"  # or "llama-3.1-70b-versatile"
+    model_name = "llama-3.1-8b-instant"  # fast, cost-effective model
 except Exception:
     st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
     st.stop()
@@ -430,38 +430,57 @@ except Exception:
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
         {"role": "system", "content": (
-            "You are an assistant that helps analyze sheep behavior data stored in InfluxDB. "
-            "The dataset includes columns: time, sheep_id, label, confidence, and optionally type (Ram or Ewe). "
-            "Answer precisely using this data context when available."
+            "You are an assistant that analyzes sheep behavior data stored in InfluxDB. "
+            "The dataset includes: time, sheep_id, label, confidence, and optionally type (Ram or Ewe). "
+            "When answering, use the actual dataset summary provided below. "
+            "You can answer questions like 'Which behavior is most frequent?', "
+            "'Which sheep type (Ram/Ewe) is more active?', or 'Average confidence per behavior'."
         )}
     ]
 
-# Display previous messages
+# Display chat history (skip system message)
 for m in st.session_state.chat_messages[1:]:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
-# Chat input
+# --- Chat input ---
 prompt = st.chat_input("Ask something about sheep behavior 🐑")
 if prompt:
     st.session_state.chat_messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Attach context: include type column if it exists
+    # --- Build AI context from df ---
     if 'df' in locals() and not df.empty:
-        # Dynamically select available columns
+        # Ensure consistency in labels
+        df["label"] = df["label"].astype(str).str.strip().str.lower()
+
+        # Columns available
         cols = [c for c in ['sheep_id', 'label', 'confidence', 'type', 'time'] if c in df.columns]
 
+        # Label frequency summary
+        label_counts = (
+            df["label"].value_counts()
+            .sort_values(ascending=False)
+            .to_string()
+        )
+
+        # Build context summary (compact + informative)
         context_summary = (
-            f"Recent data summary (up to 20 rows):\n\n"
-            f"{df[cols].tail(20).to_string(index=False)}\n\n"
-            f"Columns included: {', '.join(cols)}."
+            f"### Dataset context from InfluxDB:\n"
+            f"- Total rows: {len(df):,}\n"
+            f"- Columns available: {', '.join(cols)}\n\n"
+            f"**Behavior frequency summary:**\n{label_counts}\n\n"
+            f"**Recent data sample (last 20 rows):**\n"
+            f"{df[cols].tail(20).to_string(index=False)}"
         )
     else:
-        context_summary = "No recent data available from InfluxDB."
+        context_summary = (
+            "No recent data available from InfluxDB. "
+            "Try running a query or widening your date/time range."
+        )
 
-    # Optional debug preview
+    # --- Optional: Show what AI sees ---
     with st.expander("🔍 AI Context Preview", expanded=False):
         st.text(context_summary)
 
@@ -469,6 +488,7 @@ if prompt:
     context_msg = {"role": "system", "content": context_summary}
     messages = st.session_state.chat_messages + [context_msg]
 
+    # --- Call Groq LLM ---
     try:
         resp = client.chat.completions.create(
             model=model_name,
@@ -479,9 +499,11 @@ if prompt:
     except Exception as e:
         answer = f"⚠️ Chat error: {e}"
 
+    # --- Display answer ---
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.markdown(answer)
+
 
 
 
