@@ -33,13 +33,16 @@ from openai import OpenAI
 
 st.header("💬 Chat with the AI")
 
+# --- Simple LLM Chat (Groq cloud API + InfluxDB context) ---
+st.header("💬 Chat with the AI")
+
 # Try to connect to Groq (free cloud API)
 try:
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=st.secrets["groq"]["api_key"]
     )
-    model_name = "llama-3.1-8b-instant" # or "mixtral-8x7b-32768"
+    model_name = "llama-3.1-8b-instant"  # or "llama-3.1-70b-versatile"
 except Exception:
     st.error("Missing Groq API key. Add it in Secrets as [groq].api_key")
     st.stop()
@@ -47,7 +50,11 @@ except Exception:
 # Initialize chat history
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "system", "content": "You are a friendly assistant for a sheep behavior dashboard."}
+        {"role": "system", "content": (
+            "You are an assistant that helps analyze sheep behavior data stored in InfluxDB. "
+            "The user can ask questions like 'average grazing time', 'most active sheep', etc. "
+            "Use the data summary provided below when answering."
+        )}
     ]
 
 # Display previous messages
@@ -62,11 +69,25 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Attach context: small data summary (for performance)
+    if 'df' in locals() and not df.empty:
+        context_summary = (
+            f"Recent data summary (up to 20 rows):\n\n"
+            f"{df[['sheep_id', 'label', 'confidence', 'time']].tail(20).to_string(index=False)}\n\n"
+            "Columns: time (UTC), sheep_id, behavior label, confidence."
+        )
+    else:
+        context_summary = "No recent data available from InfluxDB."
+
+    # Add context as an extra system message
+    context_msg = {"role": "system", "content": context_summary}
+    messages = st.session_state.chat_messages + [context_msg]
+
     try:
         resp = client.chat.completions.create(
             model=model_name,
-            messages=st.session_state.chat_messages,
-            temperature=0.7,
+            messages=messages,
+            temperature=0.6,
         )
         answer = resp.choices[0].message.content
     except Exception as e:
@@ -75,6 +96,7 @@ if prompt:
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.markdown(answer)
+
 
 
 
