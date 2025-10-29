@@ -408,15 +408,13 @@ except Exception as e:
 
 
 
-# --- Simple LLM Chat (Groq cloud API) ---
-import streamlit as st
-from openai import OpenAI
 
-st.header("💬 Chat with the AI")
 
 # --- Simple LLM Chat (Groq cloud API + InfluxDB context) ---
 st.header("💬 Chat with the AI")
 
+from openai import OpenAI
+import streamlit as st
 # Try to connect to Groq (free cloud API)
 try:
     client = OpenAI(
@@ -433,8 +431,8 @@ if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
         {"role": "system", "content": (
             "You are an assistant that helps analyze sheep behavior data stored in InfluxDB. "
-            "The user can ask questions like 'average grazing time', 'most active sheep', etc. "
-            "Use the data summary provided below when answering."
+            "The dataset includes columns: time, sheep_id, label, confidence, and optionally type (Ram or Ewe). "
+            "Answer precisely using this data context when available."
         )}
     ]
 
@@ -450,15 +448,22 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Attach context: small data summary (for performance)
+    # Attach context: include type column if it exists
     if 'df' in locals() and not df.empty:
+        # Dynamically select available columns
+        cols = [c for c in ['sheep_id', 'label', 'confidence', 'type', 'time'] if c in df.columns]
+
         context_summary = (
             f"Recent data summary (up to 20 rows):\n\n"
-            f"{df[['sheep_id', 'label', 'confidence', 'time']].tail(20).to_string(index=False)}\n\n"
-            "Columns: time (UTC), sheep_id, behavior label, confidence."
+            f"{df[cols].tail(20).to_string(index=False)}\n\n"
+            f"Columns included: {', '.join(cols)}."
         )
     else:
         context_summary = "No recent data available from InfluxDB."
+
+    # Optional debug preview
+    with st.expander("🔍 AI Context Preview", expanded=False):
+        st.text(context_summary)
 
     # Add context as an extra system message
     context_msg = {"role": "system", "content": context_summary}
@@ -477,6 +482,7 @@ if prompt:
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
     with st.chat_message("assistant"):
         st.markdown(answer)
+
 
 
 
