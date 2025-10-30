@@ -3,7 +3,7 @@ import pandas as pd
 import pyarrow as pa
 from influxdb_client import InfluxDBClient            # v2 client (health)
 from influxdb_client_3 import InfluxDBClient3         # v3 client (SQL)
-
+import re
 from datetime import datetime, timedelta, timezone, time as dtime
 try:
     from zoneinfo import ZoneInfo
