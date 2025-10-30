@@ -161,111 +161,126 @@ try:
         df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
         st.dataframe(df)
 
+
+
+
+
+
+        # --- BEHAVIOUR OVER TIME (Altair line chart) ---
+        st.subheader("Behaviour occurrences over time (seconds)")
+
+        if {"time", "label", "sheep_id"}.issubset(df.columns):
+            import altair as alt
+
+            behaviour_for_line = st.selectbox(
+                "Choose behaviour to plot",
+                options=ALL_BEHAVIOURS,
+                index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
+                key="behaviour_line_select",
+            )
+
+            df_line = df.copy()
+            df_line["label_norm"] = df_line["label"].astype(str).str.strip().str.lower()
+            df_line["time_sec"] = df_line["time"].dt.floor("S")
+            target = behaviour_for_line.lower().strip()
+
+            events = (
+                df_line.assign(value=(df_line["label_norm"] == target).astype(int))
+                .groupby(["time_sec", "sheep_id"], as_index=False)["value"]
+                .max()
+                .query("value == 1")
+            )
+
+            if events.empty:
+                st.info("No occurrences of the selected behaviour.")
+            else:
+                domain_min = df["time"].min()
+                domain_max = df["time"].max()
+                zoom_x = alt.selection_interval(bind='scales', encodings=['x'])
+
+                chart = (
+                    alt.Chart(events)
+                    .mark_circle(size=40, opacity=0.9)
+                    .encode(
+                        x=alt.X(
+                            "time_sec:T",
+                            title="Time",
+                            scale=alt.Scale(domain=[domain_min, domain_max]),
+                        ),
+                        y=alt.Y(
+                            "value:Q",
+                            title="Occurrence",
+                            scale=alt.Scale(domain=[0, 1.1]),
+                            axis=alt.Axis(values=[1], labels=False, ticks=False),
+                        ),
+                        color=alt.Color("sheep_id:N", title="Sheep ID"),
+                        tooltip=[
+                            alt.Tooltip("time_sec:T", title="Time"),
+                            alt.Tooltip("sheep_id:N", title="Sheep"),
+                        ],
+                    )
+                    .properties(height=240)
+                    .add_params(zoom_x)
+                )
+                st.altair_chart(chart, use_container_width=True)
+                st.caption("Tip: scroll to zoom, drag to pan, double-click to reset.")
+        else:
+            st.info("Missing columns for behaviour chart.")
+
+
+        # --- BEHAVIOUR DISTRIBUTION (Pie chart) ---
+        st.subheader("Behaviour distribution (pie)")
+        import matplotlib.pyplot as plt
+
+        labels_norm = df["label"].astype(str).str.strip().str.lower()
+        known = [
+            "flehmen", "grazing", "head-butting", "lying",
+            "mating", "running", "standing", "walking",
+        ]
+        counts = labels_norm.value_counts().reindex(known, fill_value=0)
+        total = int(counts.sum())
+
+        if total > 0:
+            fig, ax = plt.subplots(figsize=(4.5, 3.2), dpi=120)
+            wedges, texts, autotexts = ax.pie(
+                counts.values,
+                startangle=90,
+                autopct=lambda pct: f"{pct:.1f}%" if pct >= 3.0 else "",
+                pctdistance=0.72,
+                textprops={"fontsize": 9},
+            )
+            ax.axis("equal")
+            ax.set_title("Behaviour share (%)", fontsize=10)
+
+            legend_labels = [
+                f"{name} — {int(cnt)} ({(cnt/total*100):.1f}%)"
+                for name, cnt in zip(known, counts.values)
+            ]
+            ax.legend(
+                wedges, legend_labels, title="Behaviour",
+                loc="center left", bbox_to_anchor=(1.0, 0.5),
+                fontsize=9, title_fontsize=10, frameon=False,
+            )
+
+            fig.tight_layout(pad=0.4)
+            st.pyplot(fig, use_container_width=False)
+        else:
+            st.info("No behaviour labels found for pie chart.")
+
+
+
+
+
+
+
+
+
+
 except Exception as e:
     st.error("Failed to query InfluxDB.")
     st.exception(e)
     st.stop()
 
-
-
-
-
-
-    # --- BEHAVIOUR OVER TIME ---
-    st.subheader("Behaviour occurrences over time (seconds)")
-    if {"time", "label", "sheep_id"}.issubset(df.columns):
-        behaviour_for_line = st.selectbox(
-            "Choose behaviour to plot",
-            options=ALL_BEHAVIOURS,
-            index=ALL_BEHAVIOURS.index("walking") if "walking" in ALL_BEHAVIOURS else 0,
-            key="behaviour_line_select",
-        )
-
-        import altair as alt
-        df_line = df.copy()
-        df_line["label_norm"] = df_line["label"].astype(str).str.strip().str.lower()
-        df_line["time_sec"] = df_line["time"].dt.floor("S")
-        target = behaviour_for_line.lower().strip()
-
-        events = (
-            df_line.assign(value=(df_line["label_norm"] == target).astype(int))
-            .groupby(["time_sec", "sheep_id"], as_index=False)["value"]
-            .max()
-            .query("value == 1")
-        )
-
-        if events.empty:
-            st.info("No occurrences of the selected behaviour.")
-        else:
-            domain_min = df["time"].min()
-            domain_max = df["time"].max()
-            zoom_x = alt.selection_interval(bind='scales', encodings=['x'])
-
-            chart = (
-                alt.Chart(events)
-                .mark_circle(size=40, opacity=0.9)
-                .encode(
-                    x=alt.X(
-                        "time_sec:T",
-                        title="Time",
-                        scale=alt.Scale(domain=[domain_min, domain_max]),
-                    ),
-                    y=alt.Y(
-                        "value:Q",
-                        title="Occurrence",
-                        scale=alt.Scale(domain=[0, 1.1]),
-                        axis=alt.Axis(values=[1], labels=False, ticks=False),
-                    ),
-                    color=alt.Color("sheep_id:N", title="Sheep ID"),
-                    tooltip=[
-                        alt.Tooltip("time_sec:T", title="Time"),
-                        alt.Tooltip("sheep_id:N", title="Sheep"),
-                    ],
-                )
-                .properties(height=240)
-                .add_params(zoom_x)
-            )
-            st.altair_chart(chart, use_container_width=True)
-            st.caption("Tip: scroll to zoom, drag to pan, double-click to reset.")
-
-    # --- BEHAVIOUR PIE CHART ---
-    st.subheader("Behaviour distribution (pie)")
-    import matplotlib.pyplot as plt
-
-    labels_norm = df["label"].astype(str).str.strip().str.lower()
-    known = [
-        "flehmen", "grazing", "head-butting", "lying",
-        "mating", "running", "standing", "walking",
-    ]
-    counts = labels_norm.value_counts().reindex(known, fill_value=0)
-    total = int(counts.sum())
-
-    if total > 0:
-        fig, ax = plt.subplots(figsize=(4.5, 3.2), dpi=120)
-        wedges, texts, autotexts = ax.pie(
-            counts.values,
-            startangle=90,
-            autopct=lambda pct: f"{pct:.1f}%" if pct >= 3.0 else "",
-            pctdistance=0.72,
-            textprops={"fontsize": 9},
-        )
-        ax.axis("equal")
-        ax.set_title("Behaviour share (%)", fontsize=10)
-
-        legend_labels = [
-            f"{name} — {int(cnt)} ({(cnt/total*100):.1f}%)"
-            for name, cnt in zip(known, counts.values)
-        ]
-        ax.legend(
-            wedges, legend_labels, title="Behaviour",
-            loc="center left", bbox_to_anchor=(1.0, 0.5),
-            fontsize=9, title_fontsize=10, frameon=False,
-        )
-
-        fig.tight_layout(pad=0.4)
-        st.pyplot(fig, use_container_width=False)
-    else:
-        st.info("No behaviour labels found for pie chart.")
 
 
 
