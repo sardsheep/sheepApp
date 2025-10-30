@@ -419,6 +419,40 @@ st.header("💬 Chat with the AI")
 
 from openai import OpenAI
 
+
+
+
+
+
+# --- Step 1: Natural language → Influx SQL bridge ---
+def generate_query_from_prompt(prompt: str) -> str | None:
+    """Return an InfluxDB SQL query string for simple natural language questions."""
+    p = prompt.lower().strip()
+
+    # Examples – you can extend this as needed
+    if "first" in p and "running" in p:
+        return "SELECT MIN(time) AS first_running_time FROM sheep_behavior_pred WHERE LOWER(label)='running'"
+    if "last" in p and "running" in p:
+        return "SELECT MAX(time) AS last_running_time FROM sheep_behavior_pred WHERE LOWER(label)='running'"
+    if "average confidence" in p:
+        return "SELECT label, AVG(confidence) AS avg_conf FROM sheep_behavior_pred GROUP BY label ORDER BY avg_conf DESC"
+    if "most active" in p or "most events" in p:
+        return "SELECT sheep_id, COUNT(*) AS events FROM sheep_behavior_pred GROUP BY sheep_id ORDER BY events DESC LIMIT 1"
+    if "behaviour count" in p or "behavior count" in p:
+        return "SELECT label, COUNT(*) AS count FROM sheep_behavior_pred GROUP BY label ORDER BY count DESC"
+
+    # Add other rules for your use case here
+    return None
+
+
+
+
+
+
+
+
+
+
 # Try to connect to Groq (free cloud API)
 try:
     client = OpenAI(
@@ -517,9 +551,49 @@ if prompt:
         st.text(context_summary)
 
     # Add context as an extra system message
-    context_msg = {"role": "system", "content": context_summary}
+    context_msg = {"role": "system", "content": context_summary + "\n\n" + query_result_text}
     messages = st.session_state.chat_messages + [context_msg]
 
+
+
+
+
+
+
+# --- Query-on-demand layer ---
+query_result_text = ""
+query = generate_query_from_prompt(prompt)
+if query:
+    try:
+        with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as qclient:
+            qres = qclient.query(query)
+            if isinstance(qres, pd.DataFrame):
+                qdf = qres
+            elif isinstance(qres, pa.Table):
+                qdf = qres.to_pandas()
+            elif isinstance(qres, list) and qres and isinstance(qres[0], pa.Table):
+                qdf = pd.concat([t.to_pandas() for t in qres], ignore_index=True)
+            else:
+                qdf = pd.DataFrame(qres)
+
+        if not qdf.empty:
+            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n{qdf.to_string(index=False)}"
+        else:
+            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n(No rows returned)"
+    except Exception as e:
+        query_result_text = f"Error executing query: {e}"
+
+
+
+
+
+    
+
+
+
+
+
+    
     # --- Call Groq LLM ---
     try:
         resp = client.chat.completions.create(
