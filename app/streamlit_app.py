@@ -211,6 +211,26 @@ try:
         # --- TABLE ---
         st.dataframe(df)
 
+
+
+    # --- FIRST OCCURRENCE OF RUNNING ---
+    if {"label", "time"}.issubset(df.columns):
+        df["label_norm"] = df["label"].astype(str).str.strip().str.lower()
+        first_running = df.loc[df["label_norm"] == "running", "time"].min()
+        if pd.notna(first_running):
+            st.success(f"🏃 The first time 'running' occurred was: **{first_running}**")
+        else:
+            st.info("No 'running' events found in the selected time window.")
+    else:
+        st.warning("Cannot find 'running' events — missing 'label' or 'time' columns.")
+
+
+
+
+
+
+
+        
         # --- BEHAVIOUR OVER TIME (events-only points; interactive zoom) ---
         st.subheader("Behaviour occurrences over time (seconds)")
         if {"time", "label", "sheep_id"}.issubset(df.columns):
