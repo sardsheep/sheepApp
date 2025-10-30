@@ -213,22 +213,6 @@ try:
 
 
 
-    # --- FIRST OCCURRENCE OF RUNNING ---
-    if {"label", "time"}.issubset(df.columns):
-        df["label_norm"] = df["label"].astype(str).str.strip().str.lower()
-        first_running = df.loc[df["label_norm"] == "running", "time"].min()
-        if pd.notna(first_running):
-            st.success(f"🏃 The first time 'running' occurred was: **{first_running}**")
-        else:
-            st.info("No 'running' events found in the selected time window.")
-    else:
-        st.warning("Cannot find 'running' events — missing 'label' or 'time' columns.")
-
-
-
-
-
-
 
         
         # --- BEHAVIOUR OVER TIME (events-only points; interactive zoom) ---
@@ -485,21 +469,56 @@ if prompt:
             .to_string()
         )
 
-        # Build context summary (compact + informative)
-        context_summary = (
-            f"### Dataset context from InfluxDB:\n"
-            f"- Total rows: {len(df):,}\n"
-            f"- Columns available: {', '.join(cols)}\n\n"
-            f"**Behavior frequency summary:**\n{label_counts}\n\n"
-            f"**Recent data sample (last 20 rows):**\n"
-            f"{df[cols].tail(20).to_string(index=False)}"
-        )
-    else:
-        context_summary = (
-            "No recent data available from InfluxDB. "
-            "Try running a query or widening your date/time range."
-        )
 
+
+
+
+
+
+        
+# --- Build extended AI context with full temporal info ---
+MAX_ROWS_FOR_AI = 2000  # safety limit (avoid sending too much text to LLM)
+df_sorted = df.sort_values("time", ascending=True).copy()
+df_sorted["label_norm"] = df_sorted["label"].astype(str).str.strip().str.lower()
+
+# Compact time–label pairs (for AI reasoning)
+timeline = (
+    df_sorted[["time", "sheep_id", "label_norm"]]
+    .head(MAX_ROWS_FOR_AI)
+    .to_string(index=False)
+)
+
+# Compute behaviour counts and time ranges
+time_min, time_max = df_sorted["time"].min(), df_sorted["time"].max()
+label_counts = (
+    df_sorted["label_norm"].value_counts()
+    .sort_values(ascending=False)
+    .to_string()
+)
+
+context_summary = (
+    f"### Dataset context from InfluxDB:\n"
+    f"- Total rows: {len(df_sorted):,}\n"
+    f"- Time range: {time_min} → {time_max}\n"
+    f"- Columns available: {', '.join(cols)}\n\n"
+    f"**Behavior frequency summary:**\n{label_counts}\n\n"
+    f"**Full timeline (first {MAX_ROWS_FOR_AI} time–sheep–behaviour entries):**\n"
+    f"{timeline}"
+)
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
     # --- Optional: Show what AI sees ---
     with st.expander("🔍 AI Context Preview", expanded=False):
         st.text(context_summary)
