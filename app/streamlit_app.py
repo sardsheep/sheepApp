@@ -464,19 +464,29 @@ if prompt:
 
     # --- Build extended AI context with full temporal info ---
     if 'df' in locals() and df is not None and not df.empty:
-        # Normalize time/labels
+        # Normalize time and label
         if "time" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["time"]):
             df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
         df_sorted = df.sort_values("time", ascending=True).copy()
-        df_sorted["label"] = df_sorted["label"].astype(str)
-        df_sorted["label_norm"] = df_sorted["label"].str.strip().str.lower()
+        df_sorted["label_norm"] = df_sorted["label"].astype(str).str.strip().str.lower()
 
         cols = [c for c in ['sheep_id', 'label', 'confidence', 'type', 'time'] if c in df_sorted.columns]
 
-        # Limit for LLM context size (raise if your dataset is small)
-        MAX_ROWS_FOR_AI = 2000
-        timeline_df = df_sorted[["time", "sheep_id", "label_norm"]].head(MAX_ROWS_FOR_AI)
-        timeline = timeline_df.to_string(index=False)
+        # --- Smart size adaptation ---
+        total_rows = len(df_sorted)
+        MAX_ROWS_FOR_AI = 800   # safe for Groq's 6K token limit
+
+        if total_rows <= MAX_ROWS_FOR_AI:
+            # small dataset → include all
+            timeline_df = df_sorted[["time", "sheep_id", "label_norm"]]
+            timeline = timeline_df.to_string(index=False)
+            mode = "full dataset"
+        else:
+            # large dataset → summarize time intervals
+            step = max(1, total_rows // MAX_ROWS_FOR_AI)
+            sampled = df_sorted.iloc[::step][["time", "sheep_id", "label_norm"]]
+            timeline = sampled.to_string(index=False)
+            mode = f"sampled every {step} rows (~{len(sampled)} points)"
 
         time_min = df_sorted["time"].min()
         time_max = df_sorted["time"].max()
@@ -488,13 +498,14 @@ if prompt:
 
         context_summary = (
             f"### Dataset context from InfluxDB:\n"
-            f"- Total rows: {len(df_sorted):,}\n"
+            f"- Total rows: {total_rows:,}\n"
             f"- Time range: {time_min} → {time_max}\n"
-            f"- Columns available: {', '.join(cols)}\n\n"
+            f"- Columns: {', '.join(cols)}\n"
+            f"- Mode: {mode}\n\n"
             f"**Behavior frequency summary:**\n{label_counts}\n\n"
-            f"**Timeline (first {len(timeline_df)} time–sheep–behaviour entries):**\n"
-            f"{timeline}"
+            f"**Timeline snapshot:**\n{timeline}"
         )
+
     else:
         context_summary = (
             "No recent data available from InfluxDB. "
