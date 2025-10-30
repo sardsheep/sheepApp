@@ -565,33 +565,6 @@ if prompt:
 
 
 
-# --- Query-on-demand layer ---
-query_result_text = ""
-query = generate_query_from_prompt(prompt)
-if query:
-    try:
-        with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as qclient:
-            qres = qclient.query(query)
-            if isinstance(qres, pd.DataFrame):
-                qdf = qres
-            elif isinstance(qres, pa.Table):
-                qdf = qres.to_pandas()
-            elif isinstance(qres, list) and qres and isinstance(qres[0], pa.Table):
-                qdf = pd.concat([t.to_pandas() for t in qres], ignore_index=True)
-            else:
-                qdf = pd.DataFrame(qres)
-
-        if not qdf.empty:
-            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n{qdf.to_string(index=False)}"
-        else:
-            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n(No rows returned)"
-    except Exception as e:
-        query_result_text = f"Error executing query: {e}"
-
-
-
-
-
     
 
 
@@ -632,6 +605,52 @@ if query:
     with st.expander("🔍 AI Context Preview", expanded=False):
         st.text(context_summary)
 
+
+
+
+
+
+
+
+
+# --- Query-on-demand layer ---
+query_result_text = ""
+query = generate_query_from_prompt(prompt)
+if query:
+    try:
+        with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as qclient:
+            qres = qclient.query(query)
+            if isinstance(qres, pd.DataFrame):
+                qdf = qres
+            elif isinstance(qres, pa.Table):
+                qdf = qres.to_pandas()
+            elif isinstance(qres, list) and qres and isinstance(qres[0], pa.Table):
+                qdf = pd.concat([t.to_pandas() for t in qres], ignore_index=True)
+            else:
+                qdf = pd.DataFrame(qres)
+
+        if not qdf.empty:
+            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n{qdf.to_string(index=False)}"
+        else:
+            query_result_text = f"### Query result from InfluxDB\nQuery: `{query}`\n\n(No rows returned)"
+    except Exception as e:
+        query_result_text = f"Error executing query: {e}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
     # Add context as an extra system message
     context_msg = {"role": "system", "content": context_summary}
     messages = st.session_state.chat_messages + [context_msg]
