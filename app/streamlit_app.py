@@ -427,6 +427,10 @@ from openai import OpenAI
 # --- Step 1: Natural language → Influx SQL bridge ---
 def generate_query_from_prompt(prompt: str) -> str | None:
     """Return an InfluxDB SQL query string for simple natural language questions."""
+
+    if not prompt or not isinstance(prompt, str):
+        return None  # safety: ignore None or non-string inputs
+
     p = prompt.lower().strip()
 
     # Examples – you can extend this as needed
@@ -443,6 +447,7 @@ def generate_query_from_prompt(prompt: str) -> str | None:
 
     # Add other rules for your use case here
     return None
+
 
 
 
