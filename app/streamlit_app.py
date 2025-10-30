@@ -447,6 +447,14 @@ for m in st.session_state.chat_messages[1:]:
     with st.chat_message(m["role"]):
         st.markdown(m["content"])
 
+
+
+
+
+
+
+
+
 # --- Chat input ---
 prompt = st.chat_input("Ask something about sheep behavior 🐑")
 if prompt:
@@ -454,59 +462,70 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # --- Build AI context from df ---
-    if 'df' in locals() and not df.empty:
-        # Ensure consistency in labels
-        df["label"] = df["label"].astype(str).str.strip().str.lower()
+    # --- Build extended AI context with full temporal info ---
+    if 'df' in locals() and df is not None and not df.empty:
+        # Normalize time/labels
+        if "time" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["time"]):
+            df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
+        df_sorted = df.sort_values("time", ascending=True).copy()
+        df_sorted["label"] = df_sorted["label"].astype(str)
+        df_sorted["label_norm"] = df_sorted["label"].str.strip().str.lower()
 
-        # Columns available
-        cols = [c for c in ['sheep_id', 'label', 'confidence', 'type', 'time'] if c in df.columns]
+        cols = [c for c in ['sheep_id', 'label', 'confidence', 'type', 'time'] if c in df_sorted.columns]
 
-        # Label frequency summary
+        # Limit for LLM context size (raise if your dataset is small)
+        MAX_ROWS_FOR_AI = 2000
+        timeline_df = df_sorted[["time", "sheep_id", "label_norm"]].head(MAX_ROWS_FOR_AI)
+        timeline = timeline_df.to_string(index=False)
+
+        time_min = df_sorted["time"].min()
+        time_max = df_sorted["time"].max()
         label_counts = (
-            df["label"].value_counts()
+            df_sorted["label_norm"].value_counts()
             .sort_values(ascending=False)
             .to_string()
         )
 
+        context_summary = (
+            f"### Dataset context from InfluxDB:\n"
+            f"- Total rows: {len(df_sorted):,}\n"
+            f"- Time range: {time_min} → {time_max}\n"
+            f"- Columns available: {', '.join(cols)}\n\n"
+            f"**Behavior frequency summary:**\n{label_counts}\n\n"
+            f"**Timeline (first {len(timeline_df)} time–sheep–behaviour entries):**\n"
+            f"{timeline}"
+        )
+    else:
+        context_summary = (
+            "No recent data available from InfluxDB. "
+            "Try running a query or widening your date/time range."
+        )
 
+    # Keep this INSIDE the if prompt: block to avoid IndentationError
+    with st.expander("🔍 AI Context Preview", expanded=False):
+        st.text(context_summary)
 
+    # Add context as an extra system message
+    context_msg = {"role": "system", "content": context_summary}
+    messages = st.session_state.chat_messages + [context_msg]
 
+    # --- Call Groq LLM ---
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=0.6,
+        )
+        answer = resp.choices[0].message.content
+    except Exception as e:
+        answer = f"⚠️ Chat error: {e}"
 
+    # --- Display answer ---
+    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+    with st.chat_message("assistant"):
+        st.markdown(answer)
 
-
-        
-# --- Build extended AI context with full temporal info ---
-MAX_ROWS_FOR_AI = 2000  # safety limit (avoid sending too much text to LLM)
-df_sorted = df.sort_values("time", ascending=True).copy()
-df_sorted["label_norm"] = df_sorted["label"].astype(str).str.strip().str.lower()
-
-# Compact time–label pairs (for AI reasoning)
-timeline = (
-    df_sorted[["time", "sheep_id", "label_norm"]]
-    .head(MAX_ROWS_FOR_AI)
-    .to_string(index=False)
-)
-
-# Compute behaviour counts and time ranges
-time_min, time_max = df_sorted["time"].min(), df_sorted["time"].max()
-label_counts = (
-    df_sorted["label_norm"].value_counts()
-    .sort_values(ascending=False)
-    .to_string()
-)
-
-context_summary = (
-    f"### Dataset context from InfluxDB:\n"
-    f"- Total rows: {len(df_sorted):,}\n"
-    f"- Time range: {time_min} → {time_max}\n"
-    f"- Columns available: {', '.join(cols)}\n\n"
-    f"**Behavior frequency summary:**\n{label_counts}\n\n"
-    f"**Full timeline (first {MAX_ROWS_FOR_AI} time–sheep–behaviour entries):**\n"
-    f"{timeline}"
-)
-
-
+    
 
 
 
