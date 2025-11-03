@@ -348,15 +348,28 @@ def generate_query_from_prompt(prompt: str) -> str | None:
         ORDER BY percentage DESC
         """
 
+
     # ---- Average confidence ----
-    if "average confidence" in p or "mean confidence" in p:
-        if "each" in p or "per behavior" in p or "per behaviour" in p:
-            return "SELECT label, AVG(confidence) AS avg_conf FROM sheep_behavior_pred GROUP BY label ORDER BY avg_conf DESC"
-        if "ram" in p:
-            return "SELECT AVG(confidence) AS avg_conf_ram FROM sheep_behavior_pred WHERE LOWER(type)='ram'"
-        if "ewe" in p:
-            return "SELECT AVG(confidence) AS avg_conf_ewe FROM sheep_behavior_pred WHERE LOWER(type)='ewe'"
-        return "SELECT AVG(confidence) AS avg_conf_overall FROM sheep_behavior_pred"
+if "average confidence" in p or "mean confidence" in p:
+    # Specific behavior, e.g. "average confidence for lying"
+    import re
+    match = re.search(r"for ([a-z\-]+)", p)
+    if match:
+        behavior = match.group(1).lower()
+        return f"SELECT AVG(confidence) AS avg_conf_{behavior} FROM sheep_behavior_pred WHERE LOWER(label)='{behavior}'"
+
+    # Per-behavior average
+    if "each" in p or "per behavior" in p or "per behaviour" in p:
+        return "SELECT label, AVG(confidence) AS avg_conf FROM sheep_behavior_pred GROUP BY label ORDER BY avg_conf DESC"
+
+    # Ram / Ewe specific
+    if "ram" in p:
+        return "SELECT AVG(confidence) AS avg_conf_ram FROM sheep_behavior_pred WHERE LOWER(type)='ram'"
+    if "ewe" in p:
+        return "SELECT AVG(confidence) AS avg_conf_ewe FROM sheep_behavior_pred WHERE LOWER(type)='ewe'"
+
+    # Default overall
+    return "SELECT AVG(confidence) AS avg_conf_overall FROM sheep_behavior_pred"
 
     # ---- Compare rams vs ewes ----
     if "ram" in p and "ewe" in p:
