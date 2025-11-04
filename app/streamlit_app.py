@@ -343,6 +343,166 @@ def generate_query_from_prompt(prompt: str, start_iso: str, end_iso: str) -> str
     p = prompt.lower().strip()
     time_filter = f"WHERE time >= TIMESTAMP '{start_iso}' AND time <= TIMESTAMP '{end_iso}'"
 
+
+
+
+
+
+
+
+
+
+
+
+
+    # ---- Helpers: normalize & parse user-supplied date/time in many formats ----
+    import re
+    from datetime import datetime, timezone
+
+    def _strip_ordinals(s: str) -> str:
+        # 1st, 2nd, 3rd, 4th → 1,2,3,4  (keeps words around)
+        return re.sub(r'\b(\d{1,2})(st|nd|rd|th)\b', r'\1', s, flags=re.IGNORECASE)
+
+    def _parse_user_datetime(user_text: str):
+        """
+        Try many formats; returns (has_time: bool, iso_ts: str) if exact timestamp,
+        or (False, iso_date_start: str) if only date.
+        Assumptions:
+          - If tz is missing, we assume UTC (Z).
+          - DD/MM/YYYY is interpreted as European day-first.
+        """
+        t = _strip_ordinals(user_text.strip())
+
+        # If the text already looks ISO-ish with offset/Z, capture that first
+        m = re.search(
+            r'(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:[.,]\d+)?\s*(Z|[+\-]\d{2}:\d{2})?',
+            t
+        )
+        if m:
+            date_part, time_part, tz_part = m.group(1), m.group(2), m.group(3)
+            tz_norm = "Z" if tz_part in (None, "", "Z", "z", "+00:00") else tz_part
+            return True, f"{date_part}T{time_part}{tz_norm}"
+
+        # Known textual month names (with/without commas)
+        month_names = [
+            "%d %B %Y %H:%M:%S", "%d %B %Y %H:%M", "%d %B %Y",
+            "%B %d %Y %H:%M:%S", "%B %d %Y %H:%M", "%B %d %Y",
+            "%d %b %Y %H:%M:%S", "%d %b %Y %H:%M", "%d %b %Y",
+            "%b %d %Y %H:%M:%S", "%b %d %Y %H:%M", "%b %d %Y",
+            "%d %B, %Y %H:%M:%S", "%d %B, %Y %H:%M", "%d %B, %Y",
+            "%B %d, %Y %H:%M:%S", "%B %d, %Y %H:%M", "%B %d, %Y",
+        ]
+
+        # Numeric day-first permutations
+        numeric_dayfirst = [
+            "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+            "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M", "%d-%m-%Y",
+            "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y",
+        ]
+
+        # ISO date/time without zone
+        iso_no_tz = [
+            "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+            "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M", "%Y/%m/%d",
+        ]
+
+        for fmts in (month_names, numeric_dayfirst, iso_no_tz):
+            for fmt in fmts:
+                try:
+                    dt = datetime.strptime(t, fmt)
+                    # Did format include time?
+                    has_time = any(token in fmt for token in ("%H", "%M", "%S"))
+                    # Assume UTC if no tz provided
+                    dt = dt.replace(tzinfo=timezone.utc)
+                    if has_time:
+                        return True, dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    else:
+                        # Day start in UTC if only date
+                        day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                        return False, day_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    continue
+
+        return None, None  # not parsed
+
+    # ---- Universal rule: "label/behaviour of sheep X at/in <date/time>" (many formats) ----
+    raw_prompt = prompt.strip()
+    sheep_match = re.search(r"\bsheep\s+(\d+)\b", raw_prompt, flags=re.IGNORECASE)
+
+    # Try to locate any date-like token block in the prompt
+    # (covers "04/07/2025", "4th july 2025", "July 4, 2025", ISO with T/Z, etc.)
+    date_block_match = re.search(
+        r'(\d{1,2}\s*(?:st|nd|rd|th)?\s+[A-Za-z]{3,9}\s*,?\s*\d{4}'      # 4th July 2025 / 4 July 2025
+        r'|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:\s*(?:Z|[+\-]\d{2}:\d{2}))?'  # ISO w/ or w/o seconds + tz
+        r'|\d{4}-\d{2}-\d{2}'                                            # 2025-07-04
+        r'|\d{1,2}/\d{1,2}/\d{4}'                                        # 04/07/2025 (day-first)
+        r'|\d{1,2}[-.]\d{1,2}[-.]\d{4}'                                  # 04-07-2025 / 04.07.2025
+        r'|\b[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}\b'                        # July 4, 2025
+        r')',
+        raw_prompt,
+        flags=re.IGNORECASE
+    )
+
+    if sheep_match and date_block_match:
+        sheep_id = sheep_match.group(1)
+        block = date_block_match.group(1)
+        has_time, ts_or_daystart = _parse_user_datetime(block)
+
+        if has_time is None:
+            # Fall through if we couldn't parse
+            pass
+        elif has_time:
+            # Exact second window around the parsed timestamp (UTC)
+            ts_literal = ts_or_daystart
+            return f"""
+            WITH filtered AS (
+              SELECT time, sheep_id, label, confidence
+              FROM sheep_behavior_pred
+              {time_filter}
+            )
+            SELECT time, sheep_id, label, confidence
+            FROM filtered
+            WHERE sheep_id = '{sheep_id}'
+              AND time >= TIMESTAMP '{ts_literal}'
+              AND time <  TIMESTAMP '{ts_literal}' + INTERVAL '1 second'
+            ORDER BY time ASC
+            LIMIT 1
+            """
+        else:
+            # Only a date: query the full day [00:00:00, +1 day) in UTC
+            day_start = ts_or_daystart
+            return f"""
+            WITH filtered AS (
+              SELECT time, sheep_id, label, confidence
+              FROM sheep_behavior_pred
+              {time_filter}
+            )
+            SELECT time, sheep_id, label, confidence
+            FROM filtered
+            WHERE sheep_id = '{sheep_id}'
+              AND time >= TIMESTAMP '{day_start}'
+              AND time <  TIMESTAMP '{day_start}' + INTERVAL '1 day'
+            ORDER BY time ASC
+            LIMIT 2000
+            """
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
     # ---- Behavior timing ----
     if "first" in p and "flehmen" in p:
         return f"SELECT MIN(time) AS first_flehmen_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='flehmen'"
