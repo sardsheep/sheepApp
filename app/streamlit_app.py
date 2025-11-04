@@ -378,7 +378,9 @@ st.header("💬 Chat with the AI")
 
 from openai import OpenAI
 
-def generate_query_from_prompt(prompt: str) -> str | None:
+#def generate_query_from_prompt(prompt: str) -> str | None:
+def generate_query_from_prompt(prompt: str, start_iso: str, end_iso: str) -> str | None:
+
     """
     Generate an InfluxDB SQL query based on a natural language question.
     Designed for sheep behavior analysis (time, label, confidence, sheep_id, type).
@@ -388,112 +390,176 @@ def generate_query_from_prompt(prompt: str) -> str | None:
         return None
 
     p = prompt.lower().strip()
+    time_filter = f"WHERE time >= TIMESTAMP '{start_iso}' AND time <= TIMESTAMP '{end_iso}'"
 
     # ---- Behavior timing ----
     if "first" in p and "flehmen" in p:
-        return "SELECT MIN(time) AS first_flehmen_time FROM sheep_behavior_pred WHERE LOWER(label)='flehmen'"
+        return f"SELECT MIN(time) AS first_flehmen_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='flehmen'"
     if "last" in p and "flehmen" in p:
-        return "SELECT MAX(time) AS last_flehmen_time FROM sheep_behavior_pred WHERE LOWER(label)='flehmen'"
+        return f"SELECT MAX(time) AS last_flehmen_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='flehmen'"
     if "first" in p and "running" in p:
-        return "SELECT MIN(time) AS first_running_time FROM sheep_behavior_pred WHERE LOWER(label)='running'"
+        return f"SELECT MIN(time) AS first_running_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='running'"
     if "last" in p and "running" in p:
-        return "SELECT MAX(time) AS last_running_time FROM sheep_behavior_pred WHERE LOWER(label)='running'"
+        return f"SELECT MAX(time) AS last_running_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='running'"
     if "first" in p and "standing" in p:
-        return "SELECT MIN(time) AS first_standing_time FROM sheep_behavior_pred WHERE LOWER(label)='standing'"
+        return f"SELECT MIN(time) AS first_standing_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='standing'"
     if "last" in p and "standing" in p:
-        return "SELECT MAX(time) AS last_standing_time FROM sheep_behavior_pred WHERE LOWER(label)='standing'"
+        return f"SELECT MAX(time) AS last_standing_time FROM sheep_behavior_pred {time_filter} AND LOWER(label)='standing'"
 
     # ---- Frequency / counts ----
     if "count" in p or "how many" in p or "number of" in p:
         if "each" in p or "per behavior" in p or "per behaviour" in p:
-            return "SELECT label, COUNT(*) AS count FROM sheep_behavior_pred GROUP BY label ORDER BY count DESC"
+            return f"""
+            SELECT label, COUNT(*) AS count
+            FROM sheep_behavior_pred
+            {time_filter}
+            GROUP BY label
+            ORDER BY count DESC
+            """
         if "sheep" in p:
-            return "SELECT sheep_id, COUNT(*) AS count FROM sheep_behavior_pred GROUP BY sheep_id ORDER BY count DESC"
+            return f"""
+            SELECT sheep_id, COUNT(*) AS count
+            FROM sheep_behavior_pred
+            {time_filter}
+            GROUP BY sheep_id
+            ORDER BY count DESC
+            """
         if "flehmen" in p:
-            return "SELECT COUNT(*) AS flehmen_count FROM sheep_behavior_pred WHERE LOWER(label)='flehmen'"
+            return f"SELECT COUNT(*) AS flehmen_count FROM sheep_behavior_pred {time_filter} AND LOWER(label)='flehmen'"
         if "running" in p:
-            return "SELECT COUNT(*) AS running_count FROM sheep_behavior_pred WHERE LOWER(label)='running'"
-        return "SELECT label, COUNT(*) AS count FROM sheep_behavior_pred GROUP BY label ORDER BY count DESC"
+            return f"SELECT COUNT(*) AS running_count FROM sheep_behavior_pred {time_filter} AND LOWER(label)='running'"
+        return f"""
+        SELECT label, COUNT(*) AS count
+        FROM sheep_behavior_pred
+        {time_filter}
+        GROUP BY label
+        ORDER BY count DESC
+        """
 
     # ---- Most active / least active ----
     if "most active" in p or "most events" in p:
-        return "SELECT sheep_id, COUNT(*) AS events FROM sheep_behavior_pred GROUP BY sheep_id ORDER BY events DESC LIMIT 1"
-    if "least active" in p or "inactive" in p:
-        return "SELECT sheep_id, COUNT(*) AS events FROM sheep_behavior_pred GROUP BY sheep_id ORDER BY events ASC LIMIT 1"
-
-    # ---- Behavior proportions ----
-    if "percentage" in p or "proportion" in p or "share" in p:
-        return """
-        SELECT label,
-               COUNT(*) * 100.0 / (SELECT COUNT(*) FROM sheep_behavior_pred) AS percentage
+        return f"""
+        SELECT sheep_id, COUNT(*) AS events
         FROM sheep_behavior_pred
+        {time_filter}
+        GROUP BY sheep_id
+        ORDER BY events DESC
+        LIMIT 1
+        """
+    if "least active" in p or "inactive" in p:
+        return f"""
+        SELECT sheep_id, COUNT(*) AS events
+        FROM sheep_behavior_pred
+        {time_filter}
+        GROUP BY sheep_id
+        ORDER BY events ASC
+        LIMIT 1
+        """
+
+    # ---- Behavior proportions (use filtered CTE so the denominator is also time-filtered) ----
+    if "percentage" in p or "proportion" in p or "share" in p:
+        return f"""
+        WITH filtered AS (
+          SELECT * FROM sheep_behavior_pred
+          {time_filter}
+        )
+        SELECT label,
+               COUNT(*) * 100.0 / (SELECT COUNT(*) FROM filtered) AS percentage
+        FROM filtered
         GROUP BY label
         ORDER BY percentage DESC
         """
 
-
-        # ---- Average confidence ----
+    # ---- Average confidence ----
     if "average confidence" in p or "mean confidence" in p:
-        # Specific behavior, e.g. "average confidence for lying"
         import re
-        match = re.search(r"for ([a-z\-]+)", p)
+        match = re.search(r"for ([a-z\\-]+)", p)
         if match:
             behavior = match.group(1).lower()
-            return f"SELECT AVG(confidence) AS avg_conf_{behavior} FROM sheep_behavior_pred WHERE LOWER(label)='{behavior}'"
-    
-        # Per-behavior average
+            return f"""
+            SELECT AVG(confidence) AS avg_conf_{behavior}
+            FROM sheep_behavior_pred
+            {time_filter} AND LOWER(label)='{behavior}'
+            """
         if "each" in p or "per behavior" in p or "per behaviour" in p:
-            return "SELECT label, AVG(confidence) AS avg_conf FROM sheep_behavior_pred GROUP BY label ORDER BY avg_conf DESC"
-    
-        # Ram / Ewe specific
+            return f"""
+            SELECT label, AVG(confidence) AS avg_conf
+            FROM sheep_behavior_pred
+            {time_filter}
+            GROUP BY label
+            ORDER BY avg_conf DESC
+            """
         if "ram" in p:
-            return "SELECT AVG(confidence) AS avg_conf_ram FROM sheep_behavior_pred WHERE LOWER(type)='ram'"
+            return f"SELECT AVG(confidence) AS avg_conf_ram FROM sheep_behavior_pred {time_filter} AND LOWER(type)='ram'"
         if "ewe" in p:
-            return "SELECT AVG(confidence) AS avg_conf_ewe FROM sheep_behavior_pred WHERE LOWER(type)='ewe'"
-    
-        # Default overall
-        return "SELECT AVG(confidence) AS avg_conf_overall FROM sheep_behavior_pred"
+            return f"SELECT AVG(confidence) AS avg_conf_ewe FROM sheep_behavior_pred {time_filter} AND LOWER(type)='ewe'"
+        return f"SELECT AVG(confidence) AS avg_conf_overall FROM sheep_behavior_pred {time_filter}"
 
     # ---- Compare rams vs ewes ----
     if "ram" in p and "ewe" in p:
-        return """
+        return f"""
         SELECT type, COUNT(*) AS events
         FROM sheep_behavior_pred
-        WHERE LOWER(type) IN ('ram', 'ewe')
+        {time_filter} AND LOWER(type) IN ('ram','ewe')
         GROUP BY type
         ORDER BY events DESC
         """
 
-    # ---- Time-range queries ----
+    # ---- Time-range queries inside the prompt ----
     if "between" in p and "and" in p:
-        # Extract potential timestamps (very basic matching)
         import re
-        times = re.findall(r"\d{2}:\d{2}", p)
+        times = re.findall(r"\\d{2}:\\d{2}", p)
         if len(times) == 2:
-            return f"SELECT * FROM sheep_behavior_pred WHERE time >= TIMESTAMP '2025-07-04T{times[0]}:00Z' AND time <= TIMESTAMP '2025-07-04T{times[1]}:00Z' ORDER BY time ASC LIMIT 1000"
-        return "SELECT * FROM sheep_behavior_pred ORDER BY time ASC LIMIT 1000"
+            # Constrain to BOTH the detected range and the UI-selected window
+            return f"""
+            SELECT *
+            FROM sheep_behavior_pred
+            {time_filter} AND time >= TIMESTAMP '2025-07-04T{times[0]}:00Z'
+                           AND time <= TIMESTAMP '2025-07-04T{times[1]}:00Z'
+            ORDER BY time ASC
+            LIMIT 1000
+            """
+        return f"SELECT * FROM sheep_behavior_pred {time_filter} ORDER BY time ASC LIMIT 1000"
 
-    # ---- Behavior transitions ----
+    # ---- Behavior transitions (use filtered CTE so subqueries are also time-limited) ----
     if "after" in p and "flehmen" in p:
-        return """
-        SELECT * FROM sheep_behavior_pred
-        WHERE time > (SELECT MAX(time) FROM sheep_behavior_pred WHERE LOWER(label)='flehmen')
-        ORDER BY time ASC LIMIT 10
+        return f"""
+        WITH filtered AS (
+          SELECT * FROM sheep_behavior_pred
+          {time_filter}
+        )
+        SELECT *
+        FROM filtered
+        WHERE time > (SELECT MAX(time) FROM filtered WHERE LOWER(label)='flehmen')
+        ORDER BY time ASC
+        LIMIT 10
         """
     if "before" in p and "mating" in p:
-        return """
-        SELECT * FROM sheep_behavior_pred
-        WHERE time < (SELECT MIN(time) FROM sheep_behavior_pred WHERE LOWER(label)='mating')
-        ORDER BY time DESC LIMIT 10
+        return f"""
+        WITH filtered AS (
+          SELECT * FROM sheep_behavior_pred
+          {time_filter}
+        )
+        SELECT *
+        FROM filtered
+        WHERE time < (SELECT MIN(time) FROM filtered WHERE LOWER(label)='mating')
+        ORDER BY time DESC
+        LIMIT 10
         """
 
     # ---- Default summaries ----
     if "summary" in p or "overview" in p:
-        return "SELECT label, COUNT(*) AS count, AVG(confidence) AS avg_conf FROM sheep_behavior_pred GROUP BY label ORDER BY count DESC"
+        return f"""
+        SELECT label, COUNT(*) AS count, AVG(confidence) AS avg_conf
+        FROM sheep_behavior_pred
+        {time_filter}
+        GROUP BY label
+        ORDER BY count DESC
+        """
 
     # ---- Last events ----
     if "latest" in p or "most recent" in p:
-        return "SELECT * FROM sheep_behavior_pred ORDER BY time DESC LIMIT 5"
+        return f"SELECT * FROM sheep_behavior_pred {time_filter} ORDER BY time DESC LIMIT 5"
 
     # ---- Fallback ----
     return None
@@ -531,7 +597,7 @@ if prompt:
 
     # --- Query result placeholder ---
     query_result_text = ""
-    query = generate_query_from_prompt(prompt)
+    query = generate_query_from_prompt(prompt, start_iso, end_iso)
     if query:
         try:
             with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as qclient:
