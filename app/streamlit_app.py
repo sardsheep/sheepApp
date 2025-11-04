@@ -124,7 +124,7 @@ if selected_behaviours:
 
 
 # --- 6) SQL query builder ---
-ROW_LIMIT = None
+ROW_LIMIT = 100000000
 st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
 def build_sql(include_type: bool, include_behaviour: bool) -> str:
