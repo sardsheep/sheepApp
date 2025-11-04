@@ -494,7 +494,7 @@ if prompt:
         resp = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            temperature=0.6,
+            temperature=0.0,
         )
         answer = resp.choices[0].message.content
     except Exception as e:
