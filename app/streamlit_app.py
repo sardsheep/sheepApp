@@ -486,8 +486,9 @@ if prompt:
     # --- Combine both safely ---
     context_msg = {
         "role": "system",
-        "content": context_summary + "\n\n" + query_result_text
+        "content": query_result_text or context_summary
     }
+
     messages = st.session_state.chat_messages + [context_msg]
 
     try:
