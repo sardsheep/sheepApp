@@ -266,7 +266,7 @@ try:
             st.pyplot(fig, use_container_width=False)
         else:
             st.info("No behaviour labels found for pie chart.")
-
+        st.write(counts.rename("Count").to_frame())
 
 
 
