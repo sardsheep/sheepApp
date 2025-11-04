@@ -144,6 +144,8 @@ sql_current = build_sql(include_type=(type_clause != ""), include_behaviour=True
 # --- 7) Run query and show table ---
 try:
     with InfluxDBClient3(host=URL, token=TOKEN, org=ORG, database=DB) as client:
+        st.code(sql_current, language="sql")
+
         result = client.query(sql_current)
 
     if isinstance(result, pd.DataFrame):
