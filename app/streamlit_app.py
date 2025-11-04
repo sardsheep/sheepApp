@@ -127,19 +127,48 @@ if selected_behaviours:
 ROW_LIMIT = 100000000
 st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
+
+
+
+
 def build_sql(include_type: bool, include_behaviour: bool) -> str:
+    # Helper to drop a leading "AND " so we can compose cleanly
+    def _strip_and(s: str) -> str:
+        s = (s or "").strip()
+        return s[4:].strip() if s.lower().startswith("and ") else s
+
+    # Collect any sheep-related filters (from type_clause and sheep_clause)
+    sheep_preds = []
+    if include_type and type_clause.strip():
+        sheep_preds.append(_strip_and(type_clause))
+    if sheep_clause.strip():
+        sheep_preds.append(_strip_and(sheep_clause))
+
+    # Build a block that preserves NULL sheep_id
+    # If there are sheep filters, enforce them but also include rows where sheep_id IS NULL
+    sheep_block = ""
+    if sheep_preds:
+        sheep_block = (
+            "  AND (\n"
+            "    " + "\n    AND ".join(sheep_preds) + "\n"
+            "    OR sheep_id IS NULL\n"
+            "  )\n"
+        )
+
+    # Behaviour clause can be appended as-is (it already starts with AND when present)
+    beh_block = behaviour_clause if include_behaviour and behaviour_clause else ""
+
     return f"""
 SELECT time, confidence, label, sheep_id{(", type" if include_type else "")}
 FROM sheep_behavior_pred
 WHERE time >= TIMESTAMP '{start_iso}'
   AND time <= TIMESTAMP '{end_iso}'
-{sheep_clause}{(type_clause if include_type else "")}{(behaviour_clause if include_behaviour else "")}
-ORDER BY time ASC
+{sheep_block}{beh_block}ORDER BY time ASC
 LIMIT {ROW_LIMIT};
 """
 
+# Use it as before
 sql_current = build_sql(include_type=(type_clause != ""), include_behaviour=True)
-
 
 # --- 7) Run query and show table ---
 try:
