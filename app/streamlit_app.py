@@ -124,7 +124,7 @@ if selected_behaviours:
 
 
 # --- 6) SQL query builder ---
-ROW_LIMIT = 100000000
+ROW_LIMIT = 100000
 st.caption(f"Fetching up to **{ROW_LIMIT:,}** rows.")
 
 
