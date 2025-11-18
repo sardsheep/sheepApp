@@ -768,12 +768,5 @@ if prompt:
     with st.chat_message("assistant"):
         st.markdown(answer)
 
-    # --- Health check ---
-    try:
-        with InfluxDBClient(url=URL, token=TOKEN, org=ORG) as client:
-            health = client.health()
-            st.success(f"Influx health: {health.status} — {health.message}")
-    except Exception as e:
-        st.error("Could not reach InfluxDB.")
-        st.exception(e)
+
 
